@@ -16,10 +16,10 @@ import java.util.Map;
  * Authentication Controller
  * Handles agent login and registration
  * PUBLIC ENDPOINT - No JWT required
+ * FIXED: Removed @CrossOrigin as CORS is now configured globally in SecurityConfig
  */
 @RestController
 @RequestMapping("/api/auth")
-@CrossOrigin(origins = "*")
 public class AuthController {
     
     @Autowired
@@ -54,6 +54,7 @@ public class AuthController {
         Map<String, String> response = new HashMap<>();
         response.put("status", "UP");
         response.put("service", "Renew AI");
+        response.put("version", "1.0.0");
         return ResponseEntity.ok(response);
     }
 }

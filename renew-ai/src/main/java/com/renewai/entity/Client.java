@@ -1,5 +1,6 @@
 package com.renewai.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -39,11 +40,15 @@ public class Client {
     private String address;
     
     // Many clients can be managed by one agent
+    // FIXED: Added @JsonIgnore to prevent circular serialization
+    @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "agent_id", nullable = false)
     private Agent agent;
     
     // One client can have multiple insurance policies
+    // FIXED: Added @JsonIgnore to prevent circular serialization
+    @JsonIgnore
     @OneToMany(mappedBy = "client", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<Policy> policies;
     

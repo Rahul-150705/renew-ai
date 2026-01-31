@@ -18,10 +18,10 @@ import java.util.Map;
  * Client Controller
  * Handles client management operations
  * SECURED ENDPOINT - JWT required
+ * FIXED: Removed @CrossOrigin as CORS is now configured globally in SecurityConfig
  */
 @RestController
 @RequestMapping("/api/clients")
-@CrossOrigin(origins = "*")
 public class ClientController {
     
     @Autowired

@@ -9,6 +9,7 @@ import lombok.NoArgsConstructor;
 
 /**
  * DTO for creating a new client
+ * FIXED: Uncommented - required for backward compatibility
  */
 @Data
 @NoArgsConstructor

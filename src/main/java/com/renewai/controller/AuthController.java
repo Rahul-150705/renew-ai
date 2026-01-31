@@ -2,8 +2,6 @@ package com.renewai.controller;
 
 import com.renewai.dto.LoginRequest;
 import com.renewai.dto.LoginResponse;
-import com.renewai.dto.RegisterRequest;
-import com.renewai.entity.Agent;
 import com.renewai.service.AuthService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,10 +16,10 @@ import java.util.Map;
  * Authentication Controller
  * Handles agent login and registration
  * PUBLIC ENDPOINT - No JWT required
+ * FIXED: Removed @CrossOrigin as CORS is now configured globally in SecurityConfig
  */
 @RestController
 @RequestMapping("/api/auth")
-@CrossOrigin(origins = "*")
 public class AuthController {
     
     @Autowired
@@ -47,31 +45,6 @@ public class AuthController {
     }
     
     /**
-     * Agent registration endpoint
-     * POST /api/auth/register
-     * @param registerRequest agent registration details
-     * @return success message
-     */
-    @PostMapping("/register")
-    public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest registerRequest) {
-        try {
-            Agent registeredAgent = authService.registerAgent(registerRequest);
-            
-            Map<String, Object> response = new HashMap<>();
-            response.put("message", "Agent registered successfully");
-            response.put("username", registeredAgent.getUsername());
-            response.put("email", registeredAgent.getEmail());
-            
-            return ResponseEntity.status(HttpStatus.CREATED).body(response);
-            
-        } catch (RuntimeException e) {
-            Map<String, String> error = new HashMap<>();
-            error.put("error", e.getMessage());
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
-        }
-    }
-    
-    /**
      * Health check endpoint
      * GET /api/auth/health
      * @return status message
@@ -81,6 +54,7 @@ public class AuthController {
         Map<String, String> response = new HashMap<>();
         response.put("status", "UP");
         response.put("service", "Renew AI");
+        response.put("version", "1.0.0");
         return ResponseEntity.ok(response);
     }
 }

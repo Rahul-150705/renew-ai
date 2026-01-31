@@ -1,5 +1,6 @@
 package com.renewai.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -30,6 +31,8 @@ public class MessageLog {
     private Long id;
     
     // Reference to the policy for which message was sent
+    // FIXED: Added @JsonIgnore to prevent circular serialization
+    @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "policy_id", nullable = false)
     private Policy policy;

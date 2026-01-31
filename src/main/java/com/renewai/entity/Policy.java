@@ -1,6 +1,6 @@
 package com.renewai.entity;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -22,7 +22,6 @@ import java.util.List;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-@JsonIgnoreProperties({"messageLogs", "hibernateLazyInitializer", "handler"})
 public class Policy {
     
     @Id
@@ -59,12 +58,15 @@ public class Policy {
     private String status = "ACTIVE";
     
     // Many policies belong to one client
-    @ManyToOne(fetch = FetchType.EAGER)
+    // FIXED: Added @JsonIgnore to prevent circular serialization
+    @JsonIgnore
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "client_id", nullable = false)
-    @JsonIgnoreProperties({"agent", "policies"})
     private Client client;
     
     // Track all messages sent for this policy
+    // FIXED: Added @JsonIgnore to prevent circular serialization
+    @JsonIgnore
     @OneToMany(mappedBy = "policy", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<MessageLog> messageLogs;
     

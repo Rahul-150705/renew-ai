@@ -1,7 +1,9 @@
 package com.renewai.controller;
 
-import com.renewai.dto.PolicyDTO;
 import com.renewai.dto.PolicyRequest;
+import com.renewai.dto.PolicyWithClientRequest;
+import com.renewai.dto.PolicyWithClientResponse;
+import com.renewai.entity.Policy;
 import com.renewai.service.PolicyService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,32 +18,34 @@ import java.util.Map;
 
 /**
  * Policy Controller
- * Handles insurance policy management operations
+ * UPDATED: Simplified to handle policy creation with client details
  * SECURED ENDPOINT - JWT required
  */
 @RestController
 @RequestMapping("/api/policies")
-@CrossOrigin(origins = "*")
 public class PolicyController {
     
     @Autowired
     private PolicyService policyService;
     
     /**
-     * Create a new insurance policy
-     * POST /api/policies
-     * @param policyRequest policy details
+     * Create a new insurance policy WITH client details
+     * POST /api/policies/create
+     * This endpoint creates both client (if new) and policy in one request
+     * @param request policy and client details
      * @param authentication JWT authentication
-     * @return created policy
+     * @return created policy with client information
      */
-    @PostMapping
-    public ResponseEntity<?> createPolicy(
-            @Valid @RequestBody PolicyRequest policyRequest,
+    @PostMapping("/create")
+    public ResponseEntity<?> createPolicyWithClient(
+            @Valid @RequestBody PolicyWithClientRequest request,
             Authentication authentication) {
         
         try {
-            PolicyDTO policy = policyService.createPolicy(policyRequest);
-            return ResponseEntity.status(HttpStatus.CREATED).body(policy);
+            String username = authentication.getName();
+            PolicyWithClientResponse response = policyService.createPolicyWithClient(request, username);
+            
+            return ResponseEntity.status(HttpStatus.CREATED).body(response);
             
         } catch (RuntimeException e) {
             Map<String, String> error = new HashMap<>();
@@ -51,27 +55,29 @@ public class PolicyController {
     }
     
     /**
-     * Get all policies for a client
-     * GET /api/policies/client/{clientId}
-     * @param clientId client ID
-     * @return list of policies
+     * Get ALL policies for the authenticated agent
+     * GET /api/policies
+     * Returns all policies with client information
+     * @param authentication JWT authentication
+     * @return list of policies with client details
      */
-    @GetMapping("/client/{clientId}")
-    public ResponseEntity<List<PolicyDTO>> getPoliciesByClient(@PathVariable Long clientId) {
-        List<PolicyDTO> policies = policyService.getPoliciesByClient(clientId);
+    @GetMapping
+    public ResponseEntity<List<PolicyWithClientResponse>> getAllMyPolicies(Authentication authentication) {
+        String username = authentication.getName();
+        List<PolicyWithClientResponse> policies = policyService.getAllPoliciesForAgent(username);
         return ResponseEntity.ok(policies);
     }
     
     /**
-     * Get policy by ID
+     * Get policy by ID with client information
      * GET /api/policies/{id}
      * @param id policy ID
-     * @return policy details
+     * @return policy with client details
      */
     @GetMapping("/{id}")
     public ResponseEntity<?> getPolicyById(@PathVariable Long id) {
         try {
-            PolicyDTO policy = policyService.getPolicyById(id);
+            PolicyWithClientResponse policy = policyService.getPolicyWithClientById(id);
             return ResponseEntity.ok(policy);
             
         } catch (RuntimeException e) {
@@ -86,7 +92,7 @@ public class PolicyController {
      * PUT /api/policies/{id}/status
      * @param id policy ID
      * @param statusRequest status update request
-     * @return updated policy
+     * @return updated policy with client details
      */
     @PutMapping("/{id}/status")
     public ResponseEntity<?> updatePolicyStatus(
@@ -101,7 +107,7 @@ public class PolicyController {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
             }
             
-            PolicyDTO policy = policyService.updatePolicyStatus(id, status);
+            PolicyWithClientResponse policy = policyService.updatePolicyStatus(id, status);
             return ResponseEntity.ok(policy);
             
         } catch (RuntimeException e) {
@@ -109,5 +115,44 @@ public class PolicyController {
             error.put("error", e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
         }
+    }
+    
+    // ===== KEEP OLD ENDPOINTS FOR BACKWARD COMPATIBILITY =====
+    
+    /**
+     * OLD ENDPOINT: Create a new insurance policy (requires existing client)
+     * POST /api/policies
+     * Kept for backward compatibility
+     * @param policyRequest policy details
+     * @param authentication JWT authentication
+     * @return created policy
+     */
+    @PostMapping
+    public ResponseEntity<?> createPolicy(
+            @Valid @RequestBody PolicyRequest policyRequest,
+            Authentication authentication) {
+        
+        try {
+            Policy policy = policyService.createPolicy(policyRequest);
+            return ResponseEntity.status(HttpStatus.CREATED).body(policy);
+            
+        } catch (RuntimeException e) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+        }
+    }
+    
+    /**
+     * Get all policies for a specific client
+     * GET /api/policies/client/{clientId}
+     * Kept for backward compatibility
+     * @param clientId client ID
+     * @return list of policies
+     */
+    @GetMapping("/client/{clientId}")
+    public ResponseEntity<List<Policy>> getPoliciesByClient(@PathVariable Long clientId) {
+        List<Policy> policies = policyService.getPoliciesByClient(clientId);
+        return ResponseEntity.ok(policies);
     }
 }

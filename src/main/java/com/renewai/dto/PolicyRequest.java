@@ -10,6 +10,8 @@ import java.time.LocalDate;
 
 /**
  * DTO for creating a new insurance policy
+ * FIXED: Uncommented - required for backward compatibility
+ * UPDATED: Changed @Future to @FutureOrPresent for testing flexibility
  */
 @Data
 @NoArgsConstructor
@@ -29,6 +31,7 @@ public class PolicyRequest {
     private LocalDate startDate;
     
     @NotNull(message = "Expiry date is required")
+    @FutureOrPresent(message = "Expiry date must be today or in the future")
     private LocalDate expiryDate;
     
     @NotNull(message = "Premium amount is required")

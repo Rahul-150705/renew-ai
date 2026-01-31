@@ -2,7 +2,6 @@ package com.renewai.service;
 
 import com.renewai.dto.LoginRequest;
 import com.renewai.dto.LoginResponse;
-import com.renewai.dto.RegisterRequest;
 import com.renewai.entity.Agent;
 import com.renewai.repository.AgentRepository;
 import com.renewai.util.JwtUtil;
@@ -62,28 +61,23 @@ public class AuthService {
     
     /**
      * Register a new agent
-     * Maps RegisterRequest DTO to Agent entity before saving
-     * @param registerRequest registration details from DTO
-     * @return registered agent entity
+     * Note: In production, this should be restricted to admin users
+     * @param agent agent to register
+     * @return registered agent
      */
-    public Agent registerAgent(RegisterRequest registerRequest) {
+    public Agent registerAgent(Agent agent) {
         // Check if username already exists
-        if (agentRepository.existsByUsername(registerRequest.getUsername())) {
+        if (agentRepository.existsByUsername(agent.getUsername())) {
             throw new RuntimeException("Username already exists");
         }
         
         // Check if email already exists
-        if (agentRepository.existsByEmail(registerRequest.getEmail())) {
+        if (agentRepository.existsByEmail(agent.getEmail())) {
             throw new RuntimeException("Email already exists");
         }
         
-        // Map DTO to Entity
-        Agent agent = new Agent();
-        agent.setUsername(registerRequest.getUsername());
-        agent.setEmail(registerRequest.getEmail());
-        agent.setFullName(registerRequest.getFullName());
-        agent.setPhoneNumber(registerRequest.getPhoneNumber());
-        agent.setPassword(passwordEncoder.encode(registerRequest.getPassword()));
+        // Hash password using BCrypt
+        agent.setPassword(passwordEncoder.encode(agent.getPassword()));
         agent.setActive(true);
         
         // Save and return agent

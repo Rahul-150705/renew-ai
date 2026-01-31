@@ -1,5 +1,6 @@
 package com.renewai.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -32,6 +33,8 @@ public class Agent {
     private String email;
     
     // BCrypt hashed password (stored as 60 character hash)
+    // FIXED: Added @JsonIgnore to prevent password exposure in API responses
+    @JsonIgnore
     @Column(nullable = false, length = 100)
     private String password;
     
@@ -45,6 +48,8 @@ public class Agent {
     private Boolean active = true;
     
     // One agent can manage multiple clients
+    // FIXED: Added @JsonIgnore to prevent circular serialization
+    @JsonIgnore
     @OneToMany(mappedBy = "agent", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<Client> clients;
     

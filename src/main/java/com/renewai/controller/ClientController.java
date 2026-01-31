@@ -1,7 +1,7 @@
 package com.renewai.controller;
 
-import com.renewai.dto.ClientDTO;
 import com.renewai.dto.ClientRequest;
+import com.renewai.entity.Client;
 import com.renewai.service.ClientService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,10 +18,10 @@ import java.util.Map;
  * Client Controller
  * Handles client management operations
  * SECURED ENDPOINT - JWT required
+ * FIXED: Removed @CrossOrigin as CORS is now configured globally in SecurityConfig
  */
 @RestController
 @RequestMapping("/api/clients")
-@CrossOrigin(origins = "*")
 public class ClientController {
     
     @Autowired
@@ -41,7 +41,7 @@ public class ClientController {
         
         try {
             String username = authentication.getName();
-            ClientDTO client = clientService.createClient(clientRequest, username);
+            Client client = clientService.createClient(clientRequest, username);
             
             return ResponseEntity.status(HttpStatus.CREATED).body(client);
             
@@ -59,9 +59,9 @@ public class ClientController {
      * @return list of clients
      */
     @GetMapping
-    public ResponseEntity<List<ClientDTO>> getMyClients(Authentication authentication) {
+    public ResponseEntity<List<Client>> getMyClients(Authentication authentication) {
         String username = authentication.getName();
-        List<ClientDTO> clients = clientService.getClientsByAgent(username);
+        List<Client> clients = clientService.getClientsByAgent(username);
         return ResponseEntity.ok(clients);
     }
     
@@ -74,7 +74,7 @@ public class ClientController {
     @GetMapping("/{id}")
     public ResponseEntity<?> getClientById(@PathVariable Long id) {
         try {
-            ClientDTO client = clientService.getClientById(id);
+            Client client = clientService.getClientById(id);
             return ResponseEntity.ok(client);
             
         } catch (RuntimeException e) {

@@ -1,10 +1,13 @@
 com\renewai\service\RenewalSchedulerService.class
 com\renewai\service\AuthService.class
 com\renewai\config\JwtAuthenticationFilter.class
+com\renewai\dto\ClientDTO.class
 com\renewai\util\JwtUtil.class
 com\renewai\service\ClientService.class
 com\renewai\dto\LoginResponse.class
+com\renewai\dto\PolicyDTO$ClientBasicDTO.class
 com\renewai\service\PolicyService.class
+com\renewai\dto\RegisterRequest.class
 com\renewai\config\SecurityConfig.class
 com\renewai\entity\MessageLog.class
 com\renewai\service\MessageService.class
@@ -13,8 +16,10 @@ com\renewai\repository\MessageLogRepository.class
 com\renewai\controller\PolicyController.class
 com\renewai\dto\ClientRequest.class
 com\renewai\repository\PolicyRepository.class
+com\renewai\config\WebConfig.class
 com\renewai\controller\AuthController.class
 com\renewai\RenewAiApplication.class
+com\renewai\dto\PolicyDTO.class
 com\renewai\controller\ClientController.class
 com\renewai\repository\ClientRepository.class
 com\renewai\entity\Agent.class

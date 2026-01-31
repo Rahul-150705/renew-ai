@@ -2,6 +2,7 @@ package com.renewai.controller;
 
 import com.renewai.dto.LoginRequest;
 import com.renewai.dto.LoginResponse;
+import com.renewai.dto.RegisterRequest;
 import com.renewai.entity.Agent;
 import com.renewai.service.AuthService;
 import jakarta.validation.Valid;
@@ -48,13 +49,13 @@ public class AuthController {
     /**
      * Agent registration endpoint
      * POST /api/auth/register
-     * @param agent agent registration details
+     * @param registerRequest agent registration details
      * @return success message
      */
     @PostMapping("/register")
-    public ResponseEntity<?> register(@RequestBody Agent agent) {
+    public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest registerRequest) {
         try {
-            Agent registeredAgent = authService.registerAgent(agent);
+            Agent registeredAgent = authService.registerAgent(registerRequest);
             
             Map<String, Object> response = new HashMap<>();
             response.put("message", "Agent registered successfully");

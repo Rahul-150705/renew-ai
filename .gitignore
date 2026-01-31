@@ -1,0 +1,11 @@
+# Build files
+target/
+
+# Logs
+*.log
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store

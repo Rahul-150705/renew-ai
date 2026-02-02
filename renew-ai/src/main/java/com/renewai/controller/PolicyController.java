@@ -117,6 +117,27 @@ public class PolicyController {
         }
     }
     
+    /**
+     * Delete a policy by ID
+     * DELETE /api/policies/{id}
+     * @param id policy ID
+     * @return success message
+     */
+    @DeleteMapping("/{id}")
+    public ResponseEntity<?> deletePolicy(@PathVariable Long id) {
+        try {
+            policyService.deletePolicy(id);
+            Map<String, String> response = new HashMap<>();
+            response.put("message", "Policy deleted successfully");
+            return ResponseEntity.ok(response);
+            
+        } catch (RuntimeException e) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
+        }
+    }
+    
     // ===== KEEP OLD ENDPOINTS FOR BACKWARD COMPATIBILITY =====
     
     /**

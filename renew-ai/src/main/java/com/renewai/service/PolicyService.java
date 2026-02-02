@@ -138,6 +138,18 @@ public class PolicyService {
     }
     
     /**
+     * Delete a policy by ID
+     * @param policyId policy ID
+     */
+    @Transactional
+    public void deletePolicy(Long policyId) {
+        Policy policy = policyRepository.findById(policyId)
+                .orElseThrow(() -> new RuntimeException("Policy not found"));
+        
+        policyRepository.delete(policy);
+    }
+    
+    /**
      * Helper method to map Policy entity to PolicyWithClientResponse DTO
      */
     private PolicyWithClientResponse mapToResponse(Policy policy, Client client) {

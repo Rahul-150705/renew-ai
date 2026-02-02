@@ -10,9 +10,7 @@ com\renewai\dto\PolicyWithClientRequest.class
 com\renewai\service\PolicyService.class
 com\renewai\config\SecurityConfig.class
 com\renewai\entity\MessageLog.class
-com\renewai\service\PdfExtractionService$ClaudeRequest.class
 com\renewai\service\MessageService.class
-com\renewai\service\PdfExtractionService$Message.class
 com\renewai\entity\Policy.class
 com\renewai\repository\MessageLogRepository.class
 com\renewai\controller\PolicyController.class

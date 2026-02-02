@@ -10,29 +10,35 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+
+import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.UUID;
 
 /**
  * Service for extracting policy data from PDF documents
- * Uses Apache PDFBox for PDF parsing and Claude API for intelligent data extraction
+ * Uses Apache PDFBox for PDF parsing and ChatGPT API for intelligent data extraction
+ * Stores uploaded PDF files for future reference
  */
 @Service
 public class PdfExtractionService {
     
     private static final Logger logger = LoggerFactory.getLogger(PdfExtractionService.class);
     
-    @Value("${claude.api.key:}")
-    private String claudeApiKey;
+    @Value("${openai.api.key}")
+    private String openaiApiKey;
     
-    @Value("${claude.api.enabled:false}")
-    private boolean claudeApiEnabled;
+    @Value("${pdf.storage.path:uploads/policies}")
+    private String pdfStoragePath;
     
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newBuilder()
@@ -40,9 +46,9 @@ public class PdfExtractionService {
             .build();
     
     /**
-     * Extract policy data from PDF file
+     * Extract policy data from PDF file using ChatGPT and store the file
      * @param file PDF file
-     * @return extracted policy data
+     * @return extracted policy data with file path
      */
     public PolicyExtractionResponse extractPolicyData(MultipartFile file) throws IOException {
         logger.info("Starting PDF extraction for file: {}", file.getOriginalFilename());
@@ -56,14 +62,26 @@ public class PdfExtractionService {
         
         logger.info("Extracted {} characters from PDF", pdfText.length());
         
-        // Step 2: Use AI to extract structured data
-        PolicyExtractionResponse response;
-        if (claudeApiEnabled && claudeApiKey != null && !claudeApiKey.isEmpty()) {
-            response = extractDataUsingClaude(pdfText);
-        } else {
-            // Fallback: Use regex-based extraction
-            logger.warn("Claude API not configured, using regex-based extraction");
-            response = extractDataUsingRegex(pdfText);
+        // Step 2: Store the PDF file
+        String storedFilePath = null;
+        try {
+            storedFilePath = storePdfFile(file);
+            logger.info("PDF file stored at: {}", storedFilePath);
+        } catch (Exception e) {
+            logger.error("Failed to store PDF file: {}", e.getMessage());
+            // Continue with extraction even if storage fails
+        }
+        
+        // Step 3: Use ChatGPT API to extract structured data
+        PolicyExtractionResponse response = extractDataUsingChatGPT(pdfText);
+        
+        // Add the stored file path to the response
+        if (storedFilePath != null) {
+            String existingDesc = response.getPolicyDescription();
+            response.setPolicyDescription(
+                (existingDesc != null && !existingDesc.isEmpty() ? existingDesc + " | " : "") +
+                "PDF File: " + storedFilePath
+            );
         }
         
         return response;
@@ -78,70 +96,110 @@ public class PdfExtractionService {
             return stripper.getText(document);
         }
     }
-
-        
+    
     /**
-     * Extract structured data using Claude API
+     * Store PDF file in the file system
+     * @param file PDF file to store
+     * @return relative path to the stored file
      */
-    private PolicyExtractionResponse extractDataUsingClaude(String pdfText) {
+    private String storePdfFile(MultipartFile file) throws IOException {
+        // Create storage directory if it doesn't exist
+        Path storageDir = Paths.get(pdfStoragePath);
+        if (!Files.exists(storageDir)) {
+            Files.createDirectories(storageDir);
+            logger.info("Created PDF storage directory: {}", storageDir.toAbsolutePath());
+        }
+        
+        // Generate unique filename
+        String originalFilename = file.getOriginalFilename();
+        String fileExtension = originalFilename != null && originalFilename.contains(".") 
+            ? originalFilename.substring(originalFilename.lastIndexOf("."))
+            : ".pdf";
+        String uniqueFilename = UUID.randomUUID().toString() + fileExtension;
+        
+        // Save file
+        Path targetPath = storageDir.resolve(uniqueFilename);
+        Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+        
+        // Return relative path
+        return pdfStoragePath + File.separator + uniqueFilename;
+    }
+    
+    /**
+     * Extract structured data using ChatGPT API
+     */
+    private PolicyExtractionResponse extractDataUsingChatGPT(String pdfText) {
         try {
             String prompt = createExtractionPrompt(pdfText);
-            String claudeResponse = callClaudeAPI(prompt);
+            String chatGPTResponse = callChatGPTAPI(prompt);
             
-            // Parse Claude's JSON response
-            return parseClaudeResponse(claudeResponse);
+            // Parse ChatGPT's JSON response
+            return parseChatGPTResponse(chatGPTResponse);
             
         } catch (Exception e) {
-            logger.error("Error using Claude API: {}", e.getMessage());
-            // Fallback to regex
-            return extractDataUsingRegex(pdfText);
+            logger.error("Error using ChatGPT API: {}", e.getMessage(), e);
+            return createErrorResponse("Failed to extract data using AI: " + e.getMessage());
         }
     }
     
     /**
-     * Create prompt for Claude API
+     * Create prompt for ChatGPT API
      */
     private String createExtractionPrompt(String pdfText) {
-        return String.format("""
-            Extract insurance policy information from the following document text.
-            Return ONLY a valid JSON object with these exact fields (use null for missing values):
+        // Limit text to first 4000 characters to stay within token limits
+        String limitedText = pdfText.length() > 4000 
+            ? pdfText.substring(0, 4000) + "..." 
+            : pdfText;
             
+        return String.format("""
+            You are an expert at extracting insurance policy information from documents.
+            
+            Extract the following information from this insurance policy document and return ONLY a valid JSON object.
+            Use null for any field you cannot find. Do not include any explanation or markdown formatting.
+            
+            Required JSON format:
             {
                 "clientFullName": "string",
                 "clientEmail": "string",
-                "clientPhoneNumber": "string (E.164 format with country code)",
+                "clientPhoneNumber": "string (E.164 format with country code, e.g., +919876543210)",
                 "clientAddress": "string",
                 "policyNumber": "string",
                 "policyType": "LIFE|HEALTH|AUTO|HOME|TRAVEL",
                 "startDate": "YYYY-MM-DD",
                 "expiryDate": "YYYY-MM-DD",
-                "premium": "number as string",
+                "premium": "number as string (just the number, no currency symbols)",
                 "premiumFrequency": "MONTHLY|QUARTERLY|YEARLY",
-                "policyDescription": "string"
+                "policyDescription": "string (brief description of coverage)"
             }
             
             Document text:
             %s
             
-            Return only the JSON object, no other text.
-            """, pdfText.substring(0, Math.min(pdfText.length(), 3000))); // Limit to 3000 chars
+            Remember: Return ONLY the JSON object, no other text or formatting.
+            """, limitedText);
     }
     
     /**
-     * Call Claude API
+     * Call ChatGPT API (OpenAI)
      */
-    private String callClaudeAPI(String prompt) throws Exception {
-        String requestBody = objectMapper.writeValueAsString(new ClaudeRequest(
-            "claude-sonnet-4-20250514",
-            1024,
-            new Message[]{new Message("user", prompt)}
+    private String callChatGPTAPI(String prompt) throws Exception {
+        // Create request body for ChatGPT API
+        String requestBody = objectMapper.writeValueAsString(new ChatGPTRequest(
+            "gpt-3.5-turbo",
+            new ChatGPTMessage[]{
+                new ChatGPTMessage("system", "You are a helpful assistant that extracts structured data from insurance documents. Always respond with valid JSON only, no markdown or explanation."),
+                new ChatGPTMessage("user", prompt)
+            },
+            0.3, // Lower temperature for more consistent extraction
+            2000  // Max tokens
         ));
         
+        logger.debug("Calling ChatGPT API...");
+        
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("https://api.anthropic.com/v1/messages"))
+                .uri(URI.create("https://api.openai.com/v1/chat/completions"))
                 .header("Content-Type", "application/json")
-                .header("x-api-key", claudeApiKey)
-                .header("anthropic-version", "2023-06-01")
+                .header("Authorization", "Bearer " + openaiApiKey)
                 .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                 .timeout(Duration.ofSeconds(30))
                 .build();
@@ -149,26 +207,45 @@ public class PdfExtractionService {
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         
         if (response.statusCode() != 200) {
-            throw new RuntimeException("Claude API error: " + response.body());
+            logger.error("ChatGPT API error: {} - {}", response.statusCode(), response.body());
+            throw new RuntimeException("ChatGPT API error: " + response.statusCode() + " - " + response.body());
         }
         
+        logger.debug("ChatGPT API call successful");
         return response.body();
     }
     
     /**
-     * Parse Claude API response
+     * Parse ChatGPT API response
      */
-    private PolicyExtractionResponse parseClaudeResponse(String claudeResponse) throws Exception {
-        JsonNode root = objectMapper.readTree(claudeResponse);
-        JsonNode content = root.path("content").get(0);
-        String extractedText = content.path("text").asText();
+    private PolicyExtractionResponse parseChatGPTResponse(String chatGPTResponse) throws Exception {
+        JsonNode root = objectMapper.readTree(chatGPTResponse);
+        
+        // Get the assistant's message content
+        JsonNode choices = root.path("choices");
+        if (choices.isEmpty()) {
+            throw new RuntimeException("No response from ChatGPT");
+        }
+        
+        String extractedText = choices.get(0).path("message").path("content").asText();
+        logger.debug("Extracted text from ChatGPT: {}", extractedText);
         
         // Remove markdown code blocks if present
-        extractedText = extractedText.replaceAll("```json\\s*", "").replaceAll("```\\s*$", "").trim();
+        extractedText = extractedText
+            .replaceAll("```json\\s*", "")
+            .replaceAll("```\\s*", "")
+            .trim();
         
         // Parse the extracted JSON
-        JsonNode policyData = objectMapper.readTree(extractedText);
+        JsonNode policyData;
+        try {
+            policyData = objectMapper.readTree(extractedText);
+        } catch (Exception e) {
+            logger.error("Failed to parse ChatGPT response as JSON: {}", extractedText);
+            throw new RuntimeException("ChatGPT returned invalid JSON: " + e.getMessage());
+        }
         
+        // Build response object
         PolicyExtractionResponse response = new PolicyExtractionResponse();
         response.setClientFullName(getJsonString(policyData, "clientFullName"));
         response.setClientEmail(getJsonString(policyData, "clientEmail"));
@@ -181,10 +258,12 @@ public class PdfExtractionService {
         response.setPremium(getJsonString(policyData, "premium"));
         response.setPremiumFrequency(getJsonString(policyData, "premiumFrequency"));
         response.setPolicyDescription(getJsonString(policyData, "policyDescription"));
-        response.setSuccess(true);
-        response.setMessage("Data extracted successfully using AI");
-        response.setConfidence(0.9);
         
+        response.setSuccess(true);
+        response.setMessage("Data extracted successfully using ChatGPT AI");
+        response.setConfidence(0.95); // High confidence for AI extraction
+        
+        logger.info("Successfully parsed policy data from ChatGPT response");
         return response;
     }
     
@@ -196,72 +275,8 @@ public class PdfExtractionService {
         if (fieldNode.isMissingNode() || fieldNode.isNull()) {
             return null;
         }
-        return fieldNode.asText();
-    }
-    
-    /**
-     * Fallback: Extract data using regex patterns
-     */
-    private PolicyExtractionResponse extractDataUsingRegex(String text) {
-        PolicyExtractionResponse response = new PolicyExtractionResponse();
-        
-        // Extract client name
-        response.setClientFullName(extractPattern(text, 
-            "(?i)(name|insured|policyholder)\\s*:?\\s*([A-Z][a-z]+(?:\\s+[A-Z][a-z]+)+)"));
-        
-        // Extract email
-        response.setClientEmail(extractPattern(text,
-            "([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})"));
-        
-        // Extract phone
-        response.setClientPhoneNumber(extractPattern(text,
-            "(\\+?\\d{1,3}[\\s-]?\\(?\\d{3}\\)?[\\s-]?\\d{3}[\\s-]?\\d{4})"));
-        
-        // Extract policy number
-        response.setPolicyNumber(extractPattern(text,
-            "(?i)policy\\s*(?:number|no\\.?|#)\\s*:?\\s*([A-Z0-9-]+)"));
-        
-        // Extract dates
-        String datePattern = "(\\d{4}-\\d{2}-\\d{2}|\\d{2}/\\d{2}/\\d{4}|\\d{2}-\\d{2}-\\d{4})";
-        response.setStartDate(extractPattern(text, 
-            "(?i)(?:start|effective|from)\\s*(?:date)?\\s*:?\\s*" + datePattern));
-        response.setExpiryDate(extractPattern(text,
-            "(?i)(?:expiry|expiration|end|to)\\s*(?:date)?\\s*:?\\s*" + datePattern));
-        
-        // Extract premium
-        response.setPremium(extractPattern(text,
-            "(?i)premium\\s*:?\\s*(?:₹|Rs\\.?|USD)?\\s*([\\d,]+(?:\\.\\d{2})?)"));
-        
-        // Extract policy type
-        String policyType = extractPattern(text,
-            "(?i)(life|health|auto|home|travel)\\s+insurance");
-        if (policyType != null) {
-            response.setPolicyType(policyType.toUpperCase());
-        }
-        
-        // Set metadata
-        response.setSuccess(true);
-        response.setMessage("Data extracted using pattern matching");
-        response.setConfidence(0.6);
-        
-        return response;
-    }
-    
-    /**
-     * Helper to extract pattern from text
-     */
-    private String extractPattern(String text, String patternStr) {
-        try {
-            Pattern pattern = Pattern.compile(patternStr);
-            Matcher matcher = pattern.matcher(text);
-            if (matcher.find()) {
-                int groupCount = matcher.groupCount();
-                return matcher.group(groupCount > 1 ? 2 : 1).trim();
-            }
-        } catch (Exception e) {
-            logger.debug("Pattern match failed for: {}", patternStr);
-        }
-        return null;
+        String value = fieldNode.asText();
+        return (value != null && !value.isEmpty() && !value.equalsIgnoreCase("null")) ? value : null;
     }
     
     /**
@@ -275,7 +290,16 @@ public class PdfExtractionService {
         return response;
     }
     
-    // Inner classes for Claude API
-    private record ClaudeRequest(String model, int max_tokens, Message[] messages) {}
-    private record Message(String role, String content) {}
+    // Inner classes for ChatGPT API
+    private record ChatGPTRequest(
+        String model,
+        ChatGPTMessage[] messages,
+        double temperature,
+        int max_tokens
+    ) {}
+    
+    private record ChatGPTMessage(
+        String role,
+        String content
+    ) {}
 }

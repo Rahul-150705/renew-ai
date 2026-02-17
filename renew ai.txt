@@ -1,0 +1,36 @@
+renew-ai/
+├── src/main/java/com/renewai/
+│   ├── RenewAiApplication.java
+│   ├── config/
+│   │   ├── SecurityConfig.java
+│   │   └── JwtAuthenticationFilter.java
+│   ├── controller/
+│   │   ├── AuthController.java
+│   │   ├── ClientController.java
+│   │   └── PolicyController.java
+│   ├── service/
+│   │   ├── AuthService.java
+│   │   ├── ClientService.java
+│   │   ├── PolicyService.java
+│   │   ├── MessageService.java
+│   │   └── RenewalSchedulerService.java
+│   ├── repository/
+│   │   ├── AgentRepository.java
+│   │   ├── ClientRepository.java
+│   │   ├── PolicyRepository.java
+│   │   └── MessageLogRepository.java
+│   ├── entity/
+│   │   ├── Agent.java
+│   │   ├── Client.java
+│   │   ├── Policy.java
+│   │   └── MessageLog.java
+│   ├── dto/
+│   │   ├── LoginRequest.java
+│   │   ├── LoginResponse.java
+│   │   ├── ClientRequest.java
+│   │   └── PolicyRequest.java
+│   └── util/
+│       └── JwtUtil.java
+├── src/main/resources/
+│   └── application.properties
+└── pom.xml

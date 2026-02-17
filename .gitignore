@@ -1,11 +1,241 @@
-# Build files
-target/
+Below is a clean, production-oriented src structure + starter source code for an AI-Driven Teaching Assistant for Lecture Summarization, aligned with your preference: Spring Boot (backend) + React (frontend) and realistic for interviews.
 
-# Logs
-*.log
+I’ll give you:
 
-# VS Code
-.vscode/
+Overall architecture
 
-# OS files
-.DS_Store
+Backend (Spring Boot) – src
+
+Frontend (React) – src
+
+AI summarization flow (LLM-agnostic)
+
+How this looks in interviews
+
+1. High-Level Architecture
+
+Flow
+
+Lecture (PDF / Audio / Text)
+        ↓
+Backend (Spring Boot)
+        ↓
+Text Extraction (PDF / Transcript)
+        ↓
+AI Summarization Service (OpenAI / Claude / Gemini)
+        ↓
+Structured Summary
+        ↓
+React UI
+
+2. Backend – Spring Boot (src/main/java)
+📁 Project Structure
+src/main/java/com/ai/teachingassistant
+│
+├── TeachingAssistantApplication.java
+│
+├── controller
+│   └── LectureController.java
+│
+├── service
+│   ├── LectureService.java
+│   ├── SummarizationService.java
+│   └── PdfExtractionService.java
+│
+├── dto
+│   ├── LectureRequest.java
+│   ├── SummaryResponse.java
+│
+├── client
+│   └── LlmClient.java
+│
+├── model
+│   └── Lecture.java
+│
+└── exception
+    └── GlobalExceptionHandler.java
+
+2.1 Main Class
+@SpringBootApplication
+public class TeachingAssistantApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(TeachingAssistantApplication.class, args);
+    }
+}
+
+2.2 Controller
+@RestController
+@RequestMapping("/api/lecture")
+@CrossOrigin
+public class LectureController {
+
+    private final LectureService lectureService;
+
+    public LectureController(LectureService lectureService) {
+        this.lectureService = lectureService;
+    }
+
+    @PostMapping("/summarize")
+    public SummaryResponse summarizeLecture(
+            @RequestParam("file") MultipartFile file) {
+
+        return lectureService.processLecture(file);
+    }
+}
+
+2.3 Service Layer (Core Logic)
+LectureService
+@Service
+public class LectureService {
+
+    private final PdfExtractionService pdfService;
+    private final SummarizationService summarizationService;
+
+    public LectureService(PdfExtractionService pdfService,
+                          SummarizationService summarizationService) {
+        this.pdfService = pdfService;
+        this.summarizationService = summarizationService;
+    }
+
+    public SummaryResponse processLecture(MultipartFile file) {
+        String extractedText = pdfService.extractText(file);
+        return summarizationService.generateSummary(extractedText);
+    }
+}
+
+PDF Extraction
+@Service
+public class PdfExtractionService {
+
+    public String extractText(MultipartFile file) {
+        try (PDDocument document = PDDocument.load(file.getInputStream())) {
+            PDFTextStripper stripper = new PDFTextStripper();
+            return stripper.getText(document);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to extract PDF text");
+        }
+    }
+}
+
+AI Summarization
+@Service
+public class SummarizationService {
+
+    private final LlmClient llmClient;
+
+    public SummarizationService(LlmClient llmClient) {
+        this.llmClient = llmClient;
+    }
+
+    public SummaryResponse generateSummary(String text) {
+        String prompt = """
+        Summarize the following lecture:
+        - Key concepts
+        - Important definitions
+        - Exam-focused bullet points
+
+        Lecture Content:
+        """ + text;
+
+        return llmClient.summarize(prompt);
+    }
+}
+
+2.4 LLM Client (Pluggable)
+@Component
+public class LlmClient {
+
+    public SummaryResponse summarize(String prompt) {
+        // Call OpenAI / Claude / Gemini here
+        // Keep it abstract for interviews
+
+        return new SummaryResponse(
+                "Lecture Summary",
+                List.of("Point 1", "Point 2", "Point 3")
+        );
+    }
+}
+
+2.5 DTOs
+public class SummaryResponse {
+    private String title;
+    private List<String> keyPoints;
+
+    // constructors, getters, setters
+}
+
+3. Frontend – React (src)
+📁 Structure
+src
+│
+├── components
+│   ├── UploadLecture.jsx
+│   ├── SummaryView.jsx
+│
+├── services
+│   └── api.js
+│
+├── App.jsx
+└── main.jsx
+
+UploadLecture.jsx
+export default function UploadLecture({ onResult }) {
+
+  const upload = async (file) => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const res = await fetch("http://localhost:8080/api/lecture/summarize", {
+      method: "POST",
+      body: formData
+    });
+
+    onResult(await res.json());
+  };
+
+  return (
+    <input type="file" onChange={e => upload(e.target.files[0])} />
+  );
+}
+
+SummaryView.jsx
+export default function SummaryView({ summary }) {
+  return (
+    <div>
+      <h2>{summary.title}</h2>
+      <ul>
+        {summary.keyPoints.map((p, i) => <li key={i}>{p}</li>)}
+      </ul>
+    </div>
+  );
+}
+
+App.jsx
+import { useState } from "react";
+import UploadLecture from "./components/UploadLecture";
+import SummaryView from "./components/SummaryView";
+
+function App() {
+  const [summary, setSummary] = useState(null);
+
+  return (
+    <>
+      <UploadLecture onResult={setSummary} />
+      {summary && <SummaryView summary={summary} />}
+    </>
+  );
+}
+
+export default App;
+
+4. AI Features You Can Add (Incrementally)
+
+Topic-wise summaries
+
+MCQ generation for exams
+
+Difficulty-level summaries (Beginner / Advanced)
+
+Question answering from lecture
+
+Time-stamped summaries (for video lectures)

@@ -8,15 +8,11 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
-/**
- * DTO for policy response with client information
- * This prevents circular JSON serialization and includes all needed data
- */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 public class PolicyWithClientResponse {
-    
+
     // Policy Info
     private Long policyId;
     private String policyNumber;
@@ -29,7 +25,10 @@ public class PolicyWithClientResponse {
     private String policyStatus;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-    
+
+    // PDF Info
+    private boolean hasPdf;
+
     // Client Info
     private Long clientId;
     private String clientFullName;

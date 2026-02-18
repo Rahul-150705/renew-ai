@@ -26,4 +26,5 @@ com\renewai\dto\LoginRequest.class
 com\renewai\dto\PolicyWithClientResponse.class
 com\renewai\entity\Client.class
 com\renewai\service\PdfExtractionService.class
+com\renewai\controller\PdfDownloadController.class
 com\renewai\dto\PolicyRequest.class

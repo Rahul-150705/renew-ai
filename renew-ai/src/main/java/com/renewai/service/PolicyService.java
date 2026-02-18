@@ -9,6 +9,8 @@ import com.renewai.entity.Policy;
 import com.renewai.repository.AgentRepository;
 import com.renewai.repository.ClientRepository;
 import com.renewai.repository.PolicyRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,8 +19,18 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.stream.Collectors;
 
+/**
+ * Policy Service
+ *
+ * UPDATED: Removed all local file system logic (no more movePdfToClientFolder).
+ * PDF files are now stored in S3. The policy just stores the S3 URL in pdfFilePath.
+ *
+ * When deleting a policy, the S3 file is also deleted via CloudStorageService.
+ */
 @Service
 public class PolicyService {
+
+    private static final Logger logger = LoggerFactory.getLogger(PolicyService.class);
 
     @Autowired
     private PolicyRepository policyRepository;
@@ -29,16 +41,22 @@ public class PolicyService {
     @Autowired
     private AgentRepository agentRepository;
 
+    @Autowired
+    private CloudStorageService cloudStorageService;
+
     /**
      * Create a new insurance policy with client details.
-     * Finds existing client by email or creates a new one.
-     * Saves the pdfFilePath if provided.
+     *
+     * The pdfFilePath in the request is already a full S3 URL
+     * (set by PdfExtractionService or ClientUploadService).
+     * We just save it directly — no file moving needed.
      */
     @Transactional
     public PolicyWithClientResponse createPolicyWithClient(PolicyWithClientRequest request, String username) {
         Agent agent = agentRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("Agent not found"));
 
+        // Find existing client by email or create a new one
         Client client = clientRepository.findByEmail(request.getClientEmail())
                 .orElseGet(() -> {
                     Client newClient = new Client();
@@ -53,7 +71,6 @@ public class PolicyService {
         if (policyRepository.existsByPolicyNumber(request.getPolicyNumber())) {
             throw new RuntimeException("Policy number already exists");
         }
-
         if (request.getExpiryDate().isBefore(request.getStartDate())) {
             throw new RuntimeException("Expiry date must be after start date");
         }
@@ -69,9 +86,10 @@ public class PolicyService {
         policy.setStatus("ACTIVE");
         policy.setClient(client);
 
-        // Save PDF path if provided from extraction
+        // S3 URL stored directly — no temp folder, no file move
         if (request.getPdfFilePath() != null && !request.getPdfFilePath().isBlank()) {
             policy.setPdfFilePath(request.getPdfFilePath());
+            logger.info("Policy {} linked to S3 file: {}", request.getPolicyNumber(), request.getPdfFilePath());
         }
 
         policy = policyRepository.save(policy);
@@ -116,16 +134,24 @@ public class PolicyService {
 
     /**
      * Delete a policy by ID.
+     * Also deletes the associated PDF from S3 if present.
      */
     @Transactional
     public void deletePolicy(Long policyId) {
         Policy policy = policyRepository.findById(policyId)
                 .orElseThrow(() -> new RuntimeException("Policy not found"));
+
+        // Delete from S3 — CloudStorageService handles errors gracefully
+        if (policy.getPdfFilePath() != null && !policy.getPdfFilePath().isBlank()) {
+            cloudStorageService.deleteFile(policy.getPdfFilePath());
+        }
+
         policyRepository.delete(policy);
     }
 
     /**
      * Get the raw Policy entity (used by PDF download endpoint).
+     * pdfFilePath is an S3 URL — redirect or proxy as needed.
      */
     public Policy getPolicyEntityById(Long policyId) {
         return policyRepository.findById(policyId)
@@ -164,7 +190,6 @@ public class PolicyService {
         if (policyRepository.existsByPolicyNumber(policyRequest.getPolicyNumber())) {
             throw new RuntimeException("Policy number already exists");
         }
-
         if (policyRequest.getExpiryDate().isBefore(policyRequest.getStartDate())) {
             throw new RuntimeException("Expiry date must be after start date");
         }
@@ -179,7 +204,6 @@ public class PolicyService {
         policy.setDescription(policyRequest.getDescription());
         policy.setStatus("ACTIVE");
         policy.setClient(client);
-
         return policyRepository.save(policy);
     }
 

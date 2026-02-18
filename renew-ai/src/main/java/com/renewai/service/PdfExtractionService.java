@@ -20,17 +20,18 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 
 /**
- * PDF Extraction Service — Agent Side
+ * PDF Extraction Service
  *
- * UPDATED: Now uploads to S3 instead of local disk.
- * No temp folders. No file moving. Just:
- *   1. Extract text from PDF (in memory)
- *   2. Send to ChatGPT → structured data (policyNumber, clientEmail, etc.)
- *   3. Upload PDF to S3 → get permanent URL
- *   4. Return extracted data + S3 URL
+ * Handles PDF upload and data extraction for policy creation.
  *
- * S3 path: policies/agent/{clientEmail}/{policyNumber}.pdf
- * The URL is stored directly in policy.pdfFilePath.
+ * FLOW:
+ * 1. Extract raw text from the PDF in memory (nothing written to disk)
+ * 2. Send text to ChatGPT → returns structured JSON with policy details
+ * 3. Upload the PDF to S3 → returns a permanent public URL
+ * 4. Return extracted data + S3 URL back to the controller
+ *
+ * The S3 URL is stored in policy.pdfFilePath in the database.
+ * No local disk storage is used at any point.
  */
 @Service
 public class PdfExtractionService {
@@ -51,44 +52,50 @@ public class PdfExtractionService {
     /**
      * Extract policy data from PDF and upload to S3.
      *
-     * FLOW:
-     * 1. Extract raw text in memory (no disk write)
-     * 2. Send to ChatGPT → policyNumber + clientEmail + other fields
-     * 3. Upload PDF to S3 → get permanent URL
-     * 4. Return extracted data with S3 URL as storedFilePath
+     * @param file the uploaded PDF file
+     * @return extracted policy + client data, plus the S3 URL in storedFilePath
      */
     public PolicyExtractionResponse extractPolicyData(MultipartFile file) throws IOException {
         logger.info("Starting PDF extraction for file: {}", file.getOriginalFilename());
 
-        // Step 1: Extract text in memory
+        // Step 1: Extract text from PDF in memory — no disk write
         String pdfText = extractTextFromPdf(file);
         if (pdfText == null || pdfText.trim().isEmpty()) {
-            String fallbackUrl = uploadWithFallback(file, null, null);
+            // Still upload the file to S3 so it isn't lost
+            String fallbackUrl = uploadToS3(file, null, null);
             return createErrorResponse("No text found in PDF", fallbackUrl);
         }
 
         logger.info("Extracted {} characters from PDF", pdfText.length());
 
-        // Step 2: Extract structured data via ChatGPT
+        // Step 2: Send text to ChatGPT to get structured policy data
         PolicyExtractionResponse response = extractDataUsingChatGPT(pdfText);
 
-        // Step 3: Upload to S3 using clientEmail + policyNumber as the path
-        String s3Url = uploadWithFallback(file, response.getClientEmail(), response.getPolicyNumber());
+        // Step 3: Upload PDF to S3 using clientEmail + policyNumber as the path
+        // e.g. policies/john_doe_gmail_com/POL-2024-001.pdf
+        String s3Url = uploadToS3(file, response.getClientEmail(), response.getPolicyNumber());
         logger.info("PDF uploaded to S3: {}", s3Url);
 
         response.setStoredFilePath(s3Url);
         return response;
     }
 
-    private String uploadWithFallback(MultipartFile file, String clientEmail, String policyNumber) {
+    /**
+     * Upload the PDF to S3. Logs and returns null if upload fails so policy
+     * creation can still proceed without a PDF.
+     */
+    private String uploadToS3(MultipartFile file, String clientEmail, String policyNumber) {
         try {
-            return cloudStorageService.uploadAgentPdf(file, clientEmail, policyNumber);
+            return cloudStorageService.uploadPdf(file, clientEmail, policyNumber);
         } catch (Exception e) {
             logger.error("Failed to upload PDF to S3: {}", e.getMessage(), e);
             return null;
         }
     }
 
+    /**
+     * Extract raw text from PDF bytes using Apache PDFBox.
+     */
     private String extractTextFromPdf(MultipartFile file) throws IOException {
         try (PDDocument document = org.apache.pdfbox.Loader.loadPDF(file.getBytes())) {
             PDFTextStripper stripper = new PDFTextStripper();
@@ -108,7 +115,10 @@ public class PdfExtractionService {
     }
 
     private String createExtractionPrompt(String pdfText) {
-        String limitedText = pdfText.length() > 4000 ? pdfText.substring(0, 4000) + "..." : pdfText;
+        String limitedText = pdfText.length() > 4000
+                ? pdfText.substring(0, 4000) + "..."
+                : pdfText;
+
         return String.format("""
                 You are an expert at extracting insurance policy information from documents.
                 Extract the following information and return ONLY a valid JSON object.
@@ -138,7 +148,8 @@ public class PdfExtractionService {
                         new ChatGPTMessage("system", "You extract structured data from insurance documents. Respond with valid JSON only."),
                         new ChatGPTMessage("user", prompt)
                 },
-                0.3, 2000
+                0.3,
+                2000
         ));
 
         HttpRequest request = HttpRequest.newBuilder()
@@ -162,9 +173,16 @@ public class PdfExtractionService {
         if (choices.isEmpty()) throw new RuntimeException("No response from ChatGPT");
 
         String extractedText = choices.get(0).path("message").path("content").asText()
-                .replaceAll("```json\\s*", "").replaceAll("```\\s*", "").trim();
+                .replaceAll("```json\\s*", "")
+                .replaceAll("```\\s*", "")
+                .trim();
 
-        JsonNode policyData = objectMapper.readTree(extractedText);
+        JsonNode policyData;
+        try {
+            policyData = objectMapper.readTree(extractedText);
+        } catch (Exception e) {
+            throw new RuntimeException("ChatGPT returned invalid JSON: " + e.getMessage());
+        }
 
         PolicyExtractionResponse response = new PolicyExtractionResponse();
         response.setClientFullName(getJsonString(policyData, "clientFullName"));

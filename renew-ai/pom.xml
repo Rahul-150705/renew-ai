@@ -90,7 +90,22 @@
         </dependency>
     </dependencies>
 </dependencyManagement>
-
+<dependency>
+    <groupId>software.amazon.awssdk</groupId>
+    <artifactId>s3</artifactId>
+    <version>2.25.6</version>
+</dependency>
+<dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>bom</artifactId>
+            <version>2.25.6</version>
+            <type>pom</type>
+            <scope>import</scope>
+        </dependency>
+    </dependencies>
+</dependencyManagement>
         <!-- Add these dependencies to your pom.xml -->
 
         <!-- Apache PDFBox for PDF parsing -->

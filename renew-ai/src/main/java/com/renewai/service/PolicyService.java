@@ -22,10 +22,13 @@ import java.util.stream.Collectors;
 /**
  * Policy Service
  *
- * UPDATED: Removed all local file system logic (no more movePdfToClientFolder).
- * PDF files are now stored in S3. The policy just stores the S3 URL in pdfFilePath.
+ * Handles all policy CRUD operations.
  *
- * When deleting a policy, the S3 file is also deleted via CloudStorageService.
+ * PDF storage is handled by S3 via CloudStorageService.
+ * The policy entity only stores the S3 URL in pdfFilePath —
+ * no local file system is involved.
+ *
+ * When a policy is deleted, the S3 file is also deleted.
  */
 @Service
 public class PolicyService {
@@ -47,9 +50,11 @@ public class PolicyService {
     /**
      * Create a new insurance policy with client details.
      *
-     * The pdfFilePath in the request is already a full S3 URL
-     * (set by PdfExtractionService or ClientUploadService).
-     * We just save it directly — no file moving needed.
+     * If the client email already exists in the DB, their record is reused.
+     * Otherwise a new client is created.
+     *
+     * The pdfFilePath field in the request is already a full S3 URL
+     * set by PdfExtractionService — we just save it directly.
      */
     @Transactional
     public PolicyWithClientResponse createPolicyWithClient(PolicyWithClientRequest request, String username) {
@@ -86,7 +91,7 @@ public class PolicyService {
         policy.setStatus("ACTIVE");
         policy.setClient(client);
 
-        // S3 URL stored directly — no temp folder, no file move
+        // Store S3 URL directly — no file moving, no temp folders
         if (request.getPdfFilePath() != null && !request.getPdfFilePath().isBlank()) {
             policy.setPdfFilePath(request.getPdfFilePath());
             logger.info("Policy {} linked to S3 file: {}", request.getPolicyNumber(), request.getPdfFilePath());
@@ -134,14 +139,15 @@ public class PolicyService {
 
     /**
      * Delete a policy by ID.
-     * Also deletes the associated PDF from S3 if present.
+     * Also deletes the associated PDF from S3 if one exists.
      */
     @Transactional
     public void deletePolicy(Long policyId) {
         Policy policy = policyRepository.findById(policyId)
                 .orElseThrow(() -> new RuntimeException("Policy not found"));
 
-        // Delete from S3 — CloudStorageService handles errors gracefully
+        // Delete PDF from S3 — CloudStorageService handles errors gracefully
+        // so this will never cause the policy deletion to fail
         if (policy.getPdfFilePath() != null && !policy.getPdfFilePath().isBlank()) {
             cloudStorageService.deleteFile(policy.getPdfFilePath());
         }
@@ -150,8 +156,8 @@ public class PolicyService {
     }
 
     /**
-     * Get the raw Policy entity (used by PDF download endpoint).
-     * pdfFilePath is an S3 URL — redirect or proxy as needed.
+     * Get the raw Policy entity.
+     * pdfFilePath is an S3 URL — the frontend can open it directly.
      */
     public Policy getPolicyEntityById(Long policyId) {
         return policyRepository.findById(policyId)

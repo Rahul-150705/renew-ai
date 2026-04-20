@@ -11,13 +11,13 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class PolicyExtractionResponse {
-    
+
     // Client Information
     private String clientFullName;
     private String clientEmail;
     private String clientPhoneNumber;
     private String clientAddress;
-    
+
     // Policy Information
     private String policyNumber;
     private String policyType;
@@ -26,9 +26,12 @@ public class PolicyExtractionResponse {
     private String premium;
     private String premiumFrequency;
     private String policyDescription;
-    
+
+    // Stored PDF path - used to link PDF to policy on creation
+    private String storedFilePath;
+
     // Extraction metadata
     private boolean success;
     private String message;
-    private Double confidence; // AI confidence score (0-1)
+    private Double confidence;
 }

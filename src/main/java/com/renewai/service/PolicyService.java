@@ -9,6 +9,8 @@ import com.renewai.entity.Policy;
 import com.renewai.repository.AgentRepository;
 import com.renewai.repository.ClientRepository;
 import com.renewai.repository.PolicyRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,61 +20,73 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * Service for insurance policy management
- * UPDATED: Now supports creating policies with client details in one request
+ * Policy Service
+ *
+ * Handles all policy CRUD operations.
+ *
+ * PDF storage is handled by S3 via CloudStorageService.
+ * The policy entity only stores the S3 URL in pdfFilePath —
+ * no local file system is involved.
+ *
+ * When a policy is deleted, the S3 file is also deleted.
  */
 @Service
 public class PolicyService {
-    
+
+    private static final Logger logger = LoggerFactory.getLogger(PolicyService.class);
+
     @Autowired
     private PolicyRepository policyRepository;
-    
+
     @Autowired
     private ClientRepository clientRepository;
-    
+
     @Autowired
     private AgentRepository agentRepository;
-    
+
+    // @Autowired  // PDF storage disabled
+    // private CloudStorageService cloudStorageService;
+
     /**
-     * Create a new insurance policy with client details
-     * This method will either find existing client by email or create a new one
-     * @param request policy and client details
-     * @param username username of the agent creating the policy
-     * @return policy response with client information
+     * Create a new insurance policy with client details.
+     *
+     * If the client email already exists in the DB, their record is reused.
+     * Otherwise a new client is created.
+     *
+     * The pdfFilePath field in the request is already a full S3 URL
+     * set by PdfExtractionService — we just save it directly.
      */
     @Transactional
     public PolicyWithClientResponse createPolicyWithClient(PolicyWithClientRequest request, String username) {
-        // Find the agent
         Agent agent = agentRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("Agent not found"));
-        
-        // Find or create client
+
+        // Find existing client by email or create a new one
         Client client = clientRepository.findByEmail(request.getClientEmail())
                 .orElseGet(() -> {
-                    // Create new client
                     Client newClient = new Client();
                     newClient.setFullName(request.getClientFullName());
                     newClient.setEmail(request.getClientEmail());
                     newClient.setPhoneNumber(request.getClientPhoneNumber());
+                    newClient.setWhatsappNumber(request.getClientWhatsappNumber());
                     newClient.setAddress(request.getClientAddress());
                     newClient.setAgent(agent);
                     return clientRepository.save(newClient);
                 });
-        
-        // Check if policy number already exists
+
         if (policyRepository.existsByPolicyNumber(request.getPolicyNumber())) {
             throw new RuntimeException("Policy number already exists");
         }
-        
-        // Validate dates
         if (request.getExpiryDate().isBefore(request.getStartDate())) {
             throw new RuntimeException("Expiry date must be after start date");
         }
-        
-        // Create new policy
+
         Policy policy = new Policy();
         policy.setPolicyNumber(request.getPolicyNumber());
-        policy.setPolicyType(request.getPolicyType());
+        policy.setPolicyType(request.getPolicyType() != null ? request.getPolicyType() : "VEHICLE");
+        policy.setVehicleType(request.getVehicleType());
+        policy.setRegistrationNumber(request.getRegistrationNumber());
+        policy.setInsurerName(request.getInsurerName());
         policy.setStartDate(request.getStartDate());
         policy.setExpiryDate(request.getExpiryDate());
         policy.setPremium(request.getPremium());
@@ -80,128 +94,149 @@ public class PolicyService {
         policy.setDescription(request.getPolicyDescription());
         policy.setStatus("ACTIVE");
         policy.setClient(client);
-        
-        // Save policy
+
+        // PDF storage disabled — pdfFilePath not used
+        // if (request.getPdfFilePath() != null && !request.getPdfFilePath().isBlank()) {
+        //     policy.setPdfFilePath(request.getPdfFilePath());
+        //     logger.info("Policy {} linked to S3 file: {}", request.getPolicyNumber(), request.getPdfFilePath());
+        // }
+
         policy = policyRepository.save(policy);
-        
-        // Return response DTO
         return mapToResponse(policy, client);
     }
-    
+
     /**
-     * Get all policies for the authenticated agent
-     * @param username username of the agent
-     * @return list of policy responses with client information
+     * Get all policies for the authenticated agent.
      */
     public List<PolicyWithClientResponse> getAllPoliciesForAgent(String username) {
-        // Find the agent
         Agent agent = agentRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("Agent not found"));
-        
-        // Get all clients for this agent
+
         List<Client> clients = clientRepository.findByAgent(agent);
-        
-        // Get all policies for these clients
+
         return clients.stream()
                 .flatMap(client -> policyRepository.findByClient(client).stream()
                         .map(policy -> mapToResponse(policy, client)))
                 .collect(Collectors.toList());
     }
-    
+
     /**
-     * Get policy by ID with client information
-     * @param policyId policy ID
-     * @return policy response with client information
+     * Get policy by ID with client information.
      */
     public PolicyWithClientResponse getPolicyWithClientById(Long policyId) {
         Policy policy = policyRepository.findById(policyId)
                 .orElseThrow(() -> new RuntimeException("Policy not found"));
-        
         return mapToResponse(policy, policy.getClient());
     }
-    
+
     /**
-     * Update policy status
-     * @param policyId policy ID
-     * @param status new status
-     * @return updated policy response
+     * Update policy status.
      */
     @Transactional
     public PolicyWithClientResponse updatePolicyStatus(Long policyId, String status) {
         Policy policy = policyRepository.findById(policyId)
                 .orElseThrow(() -> new RuntimeException("Policy not found"));
-        
         policy.setStatus(status);
         policy = policyRepository.save(policy);
-        
         return mapToResponse(policy, policy.getClient());
     }
-    
+
     /**
-     * Delete a policy by ID
-     * @param policyId policy ID
+     * Mark a policy as manually renewed.
+     * Used when automated messaging fails after max retries and
+     * the agent contacts the customer directly.
+     *
+     * @param policyId the policy ID
+     * @param notes agent's notes about the manual contact
+     * @return updated policy with client information
+     */
+    @Transactional
+    public PolicyWithClientResponse markAsManuallyRenewed(Long policyId, String notes) {
+        Policy policy = policyRepository.findById(policyId)
+                .orElseThrow(() -> new RuntimeException("Policy not found with id: " + policyId));
+
+        if ("MANUAL_RENEWED".equals(policy.getRenewalStatus())) {
+            throw new IllegalStateException("Policy is already marked as MANUAL_RENEWED");
+        }
+
+        policy.setRenewalStatus("MANUAL_RENEWED");
+        policy.setManualRenewalNotes(notes);
+        policy = policyRepository.save(policy);
+
+        logger.info("Policy {} marked as MANUAL_RENEWED by agent. Notes: {}", 
+            policy.getPolicyNumber(), notes);
+
+        return mapToResponse(policy, policy.getClient());
+    }
+
+    /**
+     * Delete a policy by ID.
+     * Also deletes the associated PDF from S3 if one exists.
      */
     @Transactional
     public void deletePolicy(Long policyId) {
         Policy policy = policyRepository.findById(policyId)
                 .orElseThrow(() -> new RuntimeException("Policy not found"));
-        
+
+        // PDF storage disabled — S3 deletion commented out
+        // if (policy.getPdfFilePath() != null && !policy.getPdfFilePath().isBlank()) {
+        //     cloudStorageService.deleteFile(policy.getPdfFilePath());
+        // }
+
         policyRepository.delete(policy);
     }
-    
+
     /**
-     * Helper method to map Policy entity to PolicyWithClientResponse DTO
+     * Get the raw Policy entity.
+     * pdfFilePath is an S3 URL — the frontend can open it directly.
      */
+    public Policy getPolicyEntityById(Long policyId) {
+        return policyRepository.findById(policyId)
+                .orElseThrow(() -> new RuntimeException("Policy not found"));
+    }
+
     private PolicyWithClientResponse mapToResponse(Policy policy, Client client) {
         PolicyWithClientResponse response = new PolicyWithClientResponse();
-        
-        // Policy details
         response.setPolicyId(policy.getId());
         response.setPolicyNumber(policy.getPolicyNumber());
         response.setPolicyType(policy.getPolicyType());
+        response.setVehicleType(policy.getVehicleType());
+        response.setRegistrationNumber(policy.getRegistrationNumber());
+        response.setInsurerName(policy.getInsurerName());
         response.setStartDate(policy.getStartDate());
         response.setExpiryDate(policy.getExpiryDate());
         response.setPremium(policy.getPremium());
         response.setPremiumFrequency(policy.getPremiumFrequency());
         response.setPolicyDescription(policy.getDescription());
         response.setPolicyStatus(policy.getStatus());
+        response.setRenewalStatus(policy.getRenewalStatus());
+        response.setManualRenewalNotes(policy.getManualRenewalNotes());
         response.setCreatedAt(policy.getCreatedAt());
         response.setUpdatedAt(policy.getUpdatedAt());
-        
-        // Client details
+        // response.setHasPdf(policy.getPdfFilePath() != null && !policy.getPdfFilePath().isBlank());  // PDF storage disabled
         response.setClientId(client.getId());
         response.setClientFullName(client.getFullName());
         response.setClientEmail(client.getEmail());
         response.setClientPhoneNumber(client.getPhoneNumber());
+        response.setClientWhatsappNumber(client.getWhatsappNumber());
         response.setClientAddress(client.getAddress());
-        
         return response;
     }
-    
-    // ===== KEEP EXISTING METHODS FOR BACKWARD COMPATIBILITY =====
-    
-    /**
-     * Create a new insurance policy for a client
-     * @param policyRequest policy details
-     * @return created policy
-     */
+
+    // ===== BACKWARD COMPATIBILITY =====
+
     @Transactional
     public Policy createPolicy(PolicyRequest policyRequest) {
-        // Find the client
         Client client = clientRepository.findById(policyRequest.getClientId())
                 .orElseThrow(() -> new RuntimeException("Client not found"));
-        
-        // Check if policy number already exists
+
         if (policyRepository.existsByPolicyNumber(policyRequest.getPolicyNumber())) {
             throw new RuntimeException("Policy number already exists");
         }
-        
-        // Validate dates
         if (policyRequest.getExpiryDate().isBefore(policyRequest.getStartDate())) {
             throw new RuntimeException("Expiry date must be after start date");
         }
-        
-        // Create new policy
+
         Policy policy = new Policy();
         policy.setPolicyNumber(policyRequest.getPolicyNumber());
         policy.setPolicyType(policyRequest.getPolicyType());
@@ -212,40 +247,30 @@ public class PolicyService {
         policy.setDescription(policyRequest.getDescription());
         policy.setStatus("ACTIVE");
         policy.setClient(client);
-        
-        // Save and return policy
         return policyRepository.save(policy);
     }
-    
-    /**
-     * Get all policies for a client
-     * @param clientId client ID
-     * @return list of policies
-     */
+
     public List<Policy> getPoliciesByClient(Long clientId) {
         Client client = clientRepository.findById(clientId)
                 .orElseThrow(() -> new RuntimeException("Client not found"));
-        
         return policyRepository.findByClient(client);
     }
-    
-    /**
-     * Get policy by ID
-     * @param policyId policy ID
-     * @return policy
-     */
+
     public Policy getPolicyById(Long policyId) {
         return policyRepository.findById(policyId)
                 .orElseThrow(() -> new RuntimeException("Policy not found"));
     }
-    
-    /**
-     * Get policies expiring on a specific date
-     * Used by renewal scheduler
-     * @param expiryDate the expiry date
-     * @return list of policies expiring on that date
-     */
+
     public List<Policy> getPoliciesExpiringOn(LocalDate expiryDate) {
         return policyRepository.findPoliciesExpiringOn(expiryDate);
+    }
+
+    public List<Policy> getAllPoliciesExpiringBefore(LocalDate date) {
+        return policyRepository.findActivePoliciesExpiringBefore(date);
+    }
+
+    @Transactional
+    public Policy savePolicy(Policy policy) {
+        return policyRepository.save(policy);
     }
 }

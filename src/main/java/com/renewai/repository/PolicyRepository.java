@@ -60,4 +60,11 @@ public interface PolicyRepository extends JpaRepository<Policy, Long> {
      * @return true if policy number exists
      */
     boolean existsByPolicyNumber(String policyNumber);
+
+    /**
+     * Find all active policies expiring before a date
+     * Used to mark them as EXPIRED
+     */
+    @Query("SELECT p FROM Policy p WHERE p.expiryDate < :date AND p.status = 'ACTIVE'")
+    List<Policy> findActivePoliciesExpiringBefore(@Param("date") LocalDate date);
 }

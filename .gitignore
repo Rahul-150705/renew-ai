@@ -1,0 +1,31 @@
+# ===== Secrets =====
+.env
+
+# ===== Java / Maven =====
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# ===== IDE =====
+.idea/
+*.iws
+*.iml
+*.ipr
+.vscode/
+*.swp
+*.swo
+
+# ===== Spring Boot =====
+*.log
+hs_err_pid*
+boot_error.log
+server.log
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== Uploads =====
+uploads/

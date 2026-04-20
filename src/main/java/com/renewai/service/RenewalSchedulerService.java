@@ -50,6 +50,37 @@ public class RenewalSchedulerService {
      * 
      * This runs every day at 9:00 AM
      */
+    @Scheduled(cron = "0 0 8 * * ?")
+    public void updateExpiredPolicies() {
+        logger.info("=== Starting daily policy expiration job ===");
+        try {
+            LocalDate today = LocalDate.now();
+            List<Policy> expiredPolicies = policyService.getAllPoliciesExpiringBefore(today);
+            for (Policy policy : expiredPolicies) {
+                if ("ACTIVE".equals(policy.getStatus())) {
+                    policy.setStatus("EXPIRED");
+                    policyService.savePolicy(policy);
+                }
+            }
+            logger.info("Marked {} policies as EXPIRED", expiredPolicies.size());
+        } catch (Exception e) {
+            logger.error("Error in policy expiration job: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Scheduled job to check for expiring policies and send reminders
+     * 
+     * Cron Expression: 0 0 9 * * ?
+     * - Second: 0
+     * - Minute: 0
+     * - Hour: 9 (9:00 AM)
+     * - Day of Month: * (every day)
+     * - Month: * (every month)
+     * - Day of Week: ? (any day)
+     * 
+     * This runs every day at 9:00 AM
+     */
     @Scheduled(cron = "${renewal.scheduler.cron}")
     public void checkExpiringPoliciesAndSendReminders() {
         logger.info("=== Starting daily renewal reminder job ===");
@@ -64,6 +95,9 @@ public class RenewalSchedulerService {
             
             // Process 3-day reminders
             processReminders(threeDaysLater, "THREE_DAYS", 3);
+            
+            // Process 0-day reminders (Expiry Day)
+            processReminders(today, "EXPIRY_DAY", 0);
             
             logger.info("=== Daily renewal reminder job completed successfully ===");
             

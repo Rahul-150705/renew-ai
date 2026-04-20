@@ -1,5 +1,6 @@
 package com.renewai.controller;
 
+import com.renewai.dto.ManualRenewalRequest;
 import com.renewai.dto.PolicyRequest;
 import com.renewai.dto.PolicyWithClientRequest;
 import com.renewai.dto.PolicyWithClientResponse;
@@ -28,6 +29,26 @@ public class PolicyController {
     @Autowired
     private PolicyService policyService;
     
+    // @Autowired  // PDF storage disabled
+    // private com.renewai.service.CloudStorageService cloudStorageService;
+
+    // PDF storage disabled — upload-pdf endpoint commented out
+    // @PostMapping("/upload-pdf")
+    // public ResponseEntity<?> uploadPdf(
+    //         @RequestParam("file") org.springframework.web.multipart.MultipartFile file,
+    //         @RequestParam("clientEmail") String clientEmail,
+    //         @RequestParam("policyNumber") String policyNumber) {
+    //     try {
+    //         if (file.isEmpty() || !file.getContentType().equals("application/pdf")) {
+    //             return ResponseEntity.badRequest().body(Map.of("error", "Valid PDF file is required"));
+    //         }
+    //         String url = cloudStorageService.uploadPdf(file, clientEmail, policyNumber);
+    //         return ResponseEntity.ok(Map.of("s3Url", url));
+    //     } catch (Exception e) {
+    //         return ResponseEntity.internalServerError().body(Map.of("error", "Failed to upload PDF: " + e.getMessage()));
+    //     }
+    // }
+
     /**
      * Create a new insurance policy WITH client details
      * POST /api/policies/create
@@ -131,6 +152,53 @@ public class PolicyController {
             response.put("message", "Policy deleted successfully");
             return ResponseEntity.ok(response);
             
+        } catch (RuntimeException e) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
+        }
+    }
+    
+    
+    /**
+     * Mark a policy as manually renewed
+     * POST /api/policies/{id}/manual-renew
+     * 
+     * Used when automated messaging fails after max retries (3 attempts)
+     * and the agent calls the customer manually.
+     * 
+     * @param id policy ID
+     * @param request contains notes about the manual contact
+     * @return updated policy with client details
+     * 
+     * Request Example:
+     * { "notes": "Called customer on 21/04/2026. Customer confirmed renewal via phone." }
+     * 
+     * Success Response (200):
+     * {
+     *   "policyId": 1,
+     *   "policyNumber": "POL-2026-001",
+     *   "renewalStatus": "MANUAL_RENEWED",
+     *   "manualRenewalNotes": "Called customer on 21/04/2026...",
+     *   ...
+     * }
+     * 
+     * Error Response (400):
+     * { "error": "Policy is already marked as MANUAL_RENEWED" }
+     */
+    @PostMapping("/{id}/manual-renew")
+    public ResponseEntity<?> markAsManuallyRenewed(
+            @PathVariable Long id,
+            @RequestBody ManualRenewalRequest request) {
+        
+        try {
+            PolicyWithClientResponse response = policyService.markAsManuallyRenewed(id, request.getNotes());
+            return ResponseEntity.ok(response);
+            
+        } catch (IllegalStateException e) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
         } catch (RuntimeException e) {
             Map<String, String> error = new HashMap<>();
             error.put("error", e.getMessage());

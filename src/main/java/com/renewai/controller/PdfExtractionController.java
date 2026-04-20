@@ -16,8 +16,8 @@ import java.util.Map;
  * Handles PDF upload and data extraction for policy creation
  * SECURED ENDPOINT - JWT required
  */
-@RestController
-@RequestMapping("/api/policies")
+// @RestController  // PDF extraction disabled
+// @RequestMapping("/api/policies")
 public class PdfExtractionController {
     
     @Autowired

@@ -35,6 +35,9 @@ public class Client {
     // Phone number for SMS notifications (must include country code)
     @Column(nullable = false, length = 15)
     private String phoneNumber;
+
+    @Column(length = 15)
+    private String whatsappNumber;
     
     @Column(length = 255)
     private String address;

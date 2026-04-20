@@ -12,7 +12,7 @@ import java.util.Optional;
 
 /**
  * Repository for MessageLog entity
- * Provides database operations for message tracking and duplicate prevention
+ * Provides database operations for message tracking, duplicate prevention, and retry logic
  */
 @Repository
 public interface MessageLogRepository extends JpaRepository<MessageLog, Long> {
@@ -44,18 +44,36 @@ public interface MessageLogRepository extends JpaRepository<MessageLog, Long> {
      * @return list of message logs
      */
     List<MessageLog> findByStatus(String status);
+
+    /**
+     * Find all FAILED messages that still have retries remaining
+     * Used by the scheduler to auto-retry failed messages
+     */
+    @Query("SELECT ml FROM MessageLog ml WHERE ml.status = 'FAILED' AND ml.retryCount < :maxRetries")
+    List<MessageLog> findRetryableMessages(@Param("maxRetries") int maxRetries);
     
     /**
-     * Check if message already exists for policy and reminder type
-     * Used before sending to prevent duplicates
-     * @param policyId the policy ID
-     * @param reminderType the reminder type
-     * @return true if message already sent
+     * Check if message already exists for policy, reminder type, and channel
+     * Used before sending to prevent duplicates per channel
      */
     @Query("SELECT CASE WHEN COUNT(ml) > 0 THEN true ELSE false END " +
-           "FROM MessageLog ml WHERE ml.policy.id = :policyId AND ml.reminderType = :reminderType")
-    boolean existsByPolicyIdAndReminderType(
+           "FROM MessageLog ml WHERE ml.policy.id = :policyId AND ml.reminderType = :reminderType AND ml.channel = :channel")
+    boolean existsByPolicyIdAndReminderTypeAndChannel(
         @Param("policyId") Long policyId, 
-        @Param("reminderType") String reminderType
+        @Param("reminderType") String reminderType,
+        @Param("channel") String channel
+    );
+
+    /**
+     * Check if a SENT message already exists for policy, reminder type, and channel
+     * Used for idempotency: prevents retries from creating duplicate SENT records
+     */
+    @Query("SELECT CASE WHEN COUNT(ml) > 0 THEN true ELSE false END " +
+           "FROM MessageLog ml WHERE ml.policy.id = :policyId AND ml.reminderType = :reminderType " +
+           "AND ml.channel = :channel AND ml.status = 'SENT'")
+    boolean existsSentMessageForPolicyAndChannel(
+        @Param("policyId") Long policyId,
+        @Param("reminderType") String reminderType,
+        @Param("channel") String channel
     );
 }

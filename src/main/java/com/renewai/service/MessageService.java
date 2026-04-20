@@ -10,12 +10,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
 /**
  * Service for generating and sending renewal reminder messages
- * This service contains the AI integration point for message generation
+ * Supports retry mechanism with idempotency guarantees
  */
 @Service
 public class MessageService {
@@ -45,136 +45,162 @@ public class MessageService {
      * @param daysUntilExpiry days until policy expires
      * @return generated message content
      */
-    public String generateRenewalMessage(Policy policy, int daysUntilExpiry) {
-        // Template-based message generation (can be replaced with AI)
+    public String generateRenewalMessage(Policy policy, int daysUntilExpiry, boolean isWhatsapp) {
         String clientName = policy.getClient().getFullName();
-        String policyType = policy.getPolicyType();
+        String vehicleType = policy.getVehicleType() != null ? policy.getVehicleType() : policy.getPolicyType();
+        String regNumber = policy.getRegistrationNumber() != null ? policy.getRegistrationNumber() : "N/A";
         String policyNumber = policy.getPolicyNumber();
-        LocalDate expiryDate = policy.getExpiryDate();
-        String formattedDate = expiryDate.format(DateTimeFormatter.ofPattern("dd-MMM-yyyy"));
-        String premium = policy.getPremium().toString();
-        
-        String message;
+        String expiryDateStr = policy.getExpiryDate().format(DateTimeFormatter.ofPattern("dd-MMM-yyyy"));
         
         if (daysUntilExpiry == 7) {
-            message = String.format(
-                "Dear %s, your %s policy (%s) is expiring in 7 days on %s. " +
-                "Premium: ₹%s. Please renew soon to avoid coverage lapse. " +
-                "Contact your agent for assistance.",
-                clientName, policyType, policyNumber, formattedDate, premium
+            return String.format(
+                "Dear %s, your %s insurance (Reg: %s, Policy: %s) " +
+                "expires on %s. Please renew within 7 days to avoid a coverage lapse. " +
+                "Contact your agent for help.",
+                clientName, vehicleType, regNumber, policyNumber, expiryDateStr
             );
         } else if (daysUntilExpiry == 3) {
-            message = String.format(
-                "URGENT: Dear %s, your %s policy (%s) expires in 3 days on %s! " +
-                "Premium: ₹%s. Renew immediately to maintain continuous coverage. " +
-                "Call your agent today.",
-                clientName, policyType, policyNumber, formattedDate, premium
+            return String.format(
+                "URGENT: Dear %s, your %s insurance (Reg: %s) expires in " +
+                "3 days on %s. Renew immediately to stay covered. Call your agent today.",
+                clientName, vehicleType, regNumber, expiryDateStr
             );
         } else {
-            message = String.format(
-                "Dear %s, your %s policy (%s) is expiring soon on %s. " +
-                "Premium: ₹%s. Please renew to continue your coverage.",
-                clientName, policyType, policyNumber, formattedDate, premium
+            // Expiry day message
+            return String.format(
+                "FINAL NOTICE: Dear %s, your %s insurance (Reg: %s, " +
+                "Policy: %s) expires TODAY %s. Renew now to avoid driving " +
+                "uninsured. Contact your agent immediately.",
+                clientName, vehicleType, regNumber, policyNumber, expiryDateStr
             );
         }
-        
-        // TODO: AI Enhancement Example (commented out)
-        // message = generateMessageWithClaude(policy, daysUntilExpiry);
-        
-        return message;
     }
     
-    /**
-     * Example method showing how Claude API can be integrated
-     * This is a placeholder showing the integration pattern
-     * 
-     * @param policy the insurance policy
-     * @param daysUntilExpiry days until expiry
-     * @return AI-generated message
-     */
-    /*
-    private String generateMessageWithClaude(Policy policy, int daysUntilExpiry) {
-        try {
-            // Prepare prompt for Claude
-            String prompt = String.format(
-                "Generate a professional, concise insurance renewal reminder SMS (max 160 chars) with these details:\n" +
-                "- Client: %s\n" +
-                "- Policy Type: %s\n" +
-                "- Policy Number: %s\n" +
-                "- Expiry Date: %s\n" +
-                "- Days Until Expiry: %d\n" +
-                "- Premium: ₹%s\n" +
-                "Tone: Urgent if 3 days, Reminder if 7 days",
-                policy.getClient().getFullName(),
-                policy.getPolicyType(),
-                policy.getPolicyNumber(),
-                policy.getExpiryDate(),
-                daysUntilExpiry,
-                policy.getPremium()
-            );
-            
-            // Call Claude API here
-            // String aiMessage = claudeApiClient.generateMessage(prompt);
-            // return aiMessage;
-            
-            // Fallback to template if API fails
-            return generateRenewalMessage(policy, daysUntilExpiry);
-            
-        } catch (Exception e) {
-            logger.error("Claude API error, using template: " + e.getMessage());
-            return generateRenewalMessage(policy, daysUntilExpiry);
-        }
-    }
-    */
-    
-    /**
-     * Send renewal reminder message
-     * Checks for duplicates before sending
-     * @param policy the policy
-     * @param reminderType SEVEN_DAYS or THREE_DAYS
-     * @param daysUntilExpiry days until expiry
-     * @return true if message sent successfully
-     */
     @Transactional
     public boolean sendRenewalReminder(Policy policy, String reminderType, int daysUntilExpiry) {
-        // Check if message already sent
-        if (messageLogRepository.existsByPolicyIdAndReminderType(policy.getId(), reminderType)) {
-            logger.info("Reminder already sent for policy {} - {}", policy.getPolicyNumber(), reminderType);
+        boolean smsSent = sendGenericReminder(policy, reminderType, daysUntilExpiry, "SMS");
+        boolean whatsappSent = false;
+        
+        if (policy.getClient().getWhatsappNumber() != null && !policy.getClient().getWhatsappNumber().isEmpty()) {
+            whatsappSent = sendGenericReminder(policy, reminderType, daysUntilExpiry, "WHATSAPP");
+        }
+        
+        return smsSent || whatsappSent;
+    }
+    
+    @Transactional
+    public boolean sendGenericReminder(Policy policy, String reminderType, int daysUntilExpiry, String channel) {
+        if (messageLogRepository.existsByPolicyIdAndReminderTypeAndChannel(policy.getId(), reminderType, channel)) {
+            logger.info("Reminder already sent for policy {} - {} - {}", policy.getPolicyNumber(), reminderType, channel);
             return false;
         }
         
-        String phoneNumber = policy.getClient().getPhoneNumber();
-        String message = generateRenewalMessage(policy, daysUntilExpiry);
+        String phoneNumber = "WHATSAPP".equals(channel) ? policy.getClient().getWhatsappNumber() : policy.getClient().getPhoneNumber();
+        String message = generateRenewalMessage(policy, daysUntilExpiry, "WHATSAPP".equals(channel));
         
         boolean sent = false;
         String status = "PENDING";
-        String errorMessage = null;
+        String failureReason = null;
         
         try {
             if (twilioEnabled) {
-                // Send via Twilio
                 sent = sendViaTwilio(phoneNumber, message);
                 status = sent ? "SENT" : "FAILED";
+                if (!sent) {
+                    failureReason = "Twilio returned failure status";
+                }
             } else {
-                // Mock mode - simulate sending
-                logger.info("MOCK SMS: To {} - {}", phoneNumber, message);
+                logger.info("MOCK {}: To {} - {}", channel, phoneNumber, message);
                 sent = true;
                 status = "SENT";
             }
         } catch (Exception e) {
             logger.error("Error sending message: " + e.getMessage());
             status = "FAILED";
-            errorMessage = e.getMessage();
+            failureReason = e.getMessage();
         }
         
-        // Log the message
-        MessageLog messageLog = new MessageLog(policy, reminderType, phoneNumber, message, status);
-        if (errorMessage != null) {
-            messageLog.setErrorMessage(errorMessage);
+        MessageLog messageLog = new MessageLog(policy, reminderType, channel, phoneNumber, message, status);
+        messageLog.setLastAttemptAt(LocalDateTime.now());
+        if (failureReason != null) {
+            messageLog.setFailureReason(failureReason);
+            messageLog.setErrorMessage(failureReason);
         }
         messageLogRepository.save(messageLog);
         
         return sent;
+    }
+
+    /**
+     * Retry sending a failed message
+     * 
+     * Business Rules:
+     * - Only FAILED messages can be retried
+     * - Max 3 retry attempts
+     * - Each attempt updates retry_count, last_attempt_at, failure_reason
+     * - Idempotency: if a SENT record already exists for same policy/reminder/channel, skip
+     * 
+     * @param messageLogId the ID of the failed message log
+     * @return the updated message log
+     */
+    @Transactional
+    public MessageLog retryMessage(Long messageLogId) {
+        MessageLog messageLog = messageLogRepository.findById(messageLogId)
+                .orElseThrow(() -> new RuntimeException("Message log not found with id: " + messageLogId));
+
+        // Validate state
+        if (!"FAILED".equals(messageLog.getStatus())) {
+            throw new IllegalStateException("Only FAILED messages can be retried. Current status: " + messageLog.getStatus());
+        }
+
+        if (messageLog.getRetryCount() >= MessageLog.MAX_RETRY_COUNT) {
+            throw new IllegalStateException("Max retry attempts (" + MessageLog.MAX_RETRY_COUNT + ") reached for message: " + messageLogId);
+        }
+
+        // Idempotency check: prevent duplicate SENT messages
+        if (messageLogRepository.existsSentMessageForPolicyAndChannel(
+                messageLog.getPolicy().getId(), 
+                messageLog.getReminderType(), 
+                messageLog.getChannel())) {
+            throw new IllegalStateException("A SENT message already exists for this policy/reminder/channel combination");
+        }
+
+        // Increment retry count and update timestamp
+        messageLog.setRetryCount(messageLog.getRetryCount() + 1);
+        messageLog.setLastAttemptAt(LocalDateTime.now());
+
+        // Attempt to resend
+        String phoneNumber = messageLog.getRecipientPhone();
+        String message = messageLog.getMessageContent();
+
+        try {
+            boolean sent;
+            if (twilioEnabled) {
+                sent = sendViaTwilio(phoneNumber, message);
+            } else {
+                logger.info("MOCK RETRY {}: To {} - {} (attempt {})", 
+                    messageLog.getChannel(), phoneNumber, message, messageLog.getRetryCount());
+                sent = true;
+            }
+
+            if (sent) {
+                messageLog.setStatus("SENT");
+                messageLog.setFailureReason(null);
+                messageLog.setErrorMessage(null);
+                logger.info("Retry successful for message {} (attempt {})", messageLogId, messageLog.getRetryCount());
+            } else {
+                messageLog.setStatus("FAILED");
+                messageLog.setFailureReason("Twilio returned failure status on retry attempt " + messageLog.getRetryCount());
+                messageLog.setErrorMessage(messageLog.getFailureReason());
+            }
+        } catch (Exception e) {
+            messageLog.setStatus("FAILED");
+            messageLog.setFailureReason("Retry attempt " + messageLog.getRetryCount() + " failed: " + e.getMessage());
+            messageLog.setErrorMessage(messageLog.getFailureReason());
+            logger.error("Retry failed for message {}: {}", messageLogId, e.getMessage());
+        }
+
+        return messageLogRepository.save(messageLog);
     }
     
     /**

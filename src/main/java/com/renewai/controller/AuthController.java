@@ -2,6 +2,8 @@ package com.renewai.controller;
 
 import com.renewai.dto.LoginRequest;
 import com.renewai.dto.LoginResponse;
+import com.renewai.dto.RegistrationRequest;
+import com.renewai.entity.Agent;
 import com.renewai.service.AuthService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,6 +46,36 @@ public class AuthController {
         }
     }
     
+    /**
+     * Agent registration endpoint
+     * POST /api/auth/register or /api/auth/signup
+     */
+    @PostMapping({"/register", "/signup"})
+    public ResponseEntity<?> register(@Valid @RequestBody RegistrationRequest request) {
+        try {
+            Agent agent = new Agent();
+            agent.setUsername(request.getUsername());
+            agent.setEmail(request.getEmail());
+            agent.setPassword(request.getPassword());
+            agent.setFullName(request.getFullName());
+            agent.setPhoneNumber(request.getPhoneNumber());
+
+            Agent registeredAgent = authService.registerAgent(agent);
+            
+            // Generate token right after registration so they can be logged in automatically if needed
+            // For now, just return success
+            Map<String, String> response = new HashMap<>();
+            response.put("message", "Registration successful");
+            response.put("username", registeredAgent.getUsername());
+            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+            
+        } catch (RuntimeException e) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+        }
+    }
+
     /**
      * Health check endpoint
      * GET /api/auth/health

@@ -3,7 +3,7 @@ com\renewai\service\AuthService.class
 com\renewai\config\JwtAuthenticationFilter.class
 com\renewai\controller\PdfExtractionController.class
 com\renewai\util\JwtUtil.class
-com\renewai\service\ClientService.class
+com\renewai\service\PdfExtractionService$ChatGPTMessage.class
 com\renewai\dto\LoginResponse.class
 com\renewai\dto\PolicyExtractionResponse.class
 com\renewai\dto\PolicyWithClientRequest.class
@@ -16,9 +16,10 @@ com\renewai\repository\MessageLogRepository.class
 com\renewai\controller\PolicyController.class
 com\renewai\dto\ClientRequest.class
 com\renewai\repository\PolicyRepository.class
+com\renewai\dto\RegistrationRequest.class
 com\renewai\controller\AuthController.class
 com\renewai\RenewAiApplication.class
-com\renewai\controller\ClientController.class
+com\renewai\service\PdfExtractionService$ChatGPTRequest.class
 com\renewai\repository\ClientRepository.class
 com\renewai\entity\Agent.class
 com\renewai\repository\AgentRepository.class
@@ -26,4 +27,6 @@ com\renewai\dto\LoginRequest.class
 com\renewai\dto\PolicyWithClientResponse.class
 com\renewai\entity\Client.class
 com\renewai\service\PdfExtractionService.class
+com\renewai\controller\PdfDownloadController.class
+com\renewai\service\CloudStorageService.class
 com\renewai\dto\PolicyRequest.class

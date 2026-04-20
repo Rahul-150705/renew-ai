@@ -1,3 +1,4 @@
+
 Below is a clean, production-oriented src structure + starter source code for an AI-Driven Teaching Assistant for Lecture Summarization, aligned with your preference: Spring Boot (backend) + React (frontend) and realistic for interviews.
 
 I’ll give you:
@@ -239,3 +240,36 @@ Difficulty-level summaries (Beginner / Advanced)
 Question answering from lecture
 
 Time-stamped summaries (for video lectures)
+
+# ===== Secrets =====
+.env
+
+# ===== Java / Maven =====
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# ===== IDE =====
+.idea/
+*.iws
+*.iml
+*.ipr
+.vscode/
+*.swp
+*.swo
+
+# ===== Spring Boot =====
+*.log
+hs_err_pid*
+boot_error.log
+server.log
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== Uploads =====
+uploads/
+

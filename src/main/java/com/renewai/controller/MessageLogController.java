@@ -4,6 +4,7 @@ import com.renewai.dto.MessageLogDto;
 import com.renewai.entity.MessageLog;
 import com.renewai.repository.MessageLogRepository;
 import com.renewai.service.MessageService;
+import com.renewai.service.RenewalSchedulerService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
@@ -30,6 +31,9 @@ public class MessageLogController {
     @Autowired
     private MessageService messageService;
 
+    @Autowired
+    private RenewalSchedulerService renewalSchedulerService;
+
     /**
      * GET /api/messages/logs
      * Retrieve all message logs sorted by most recent first
@@ -43,6 +47,24 @@ public class MessageLogController {
                 .collect(Collectors.toList());
 
         return ResponseEntity.ok(dtos);
+    }
+
+    /**
+     * POST /api/messages/test-scheduler
+     * Trigger the daily renewal scheduler manually for testing
+     */
+    @PostMapping("/test-scheduler")
+    public ResponseEntity<?> triggerSchedulerManually() {
+        try {
+            renewalSchedulerService.triggerManualReminderCheck();
+            Map<String, String> response = new HashMap<>();
+            response.put("message", "Renewal scheduler triggered manually successfully");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
     }
 
     /**

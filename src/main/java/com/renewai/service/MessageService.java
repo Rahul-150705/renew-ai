@@ -13,6 +13,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
+import com.twilio.rest.api.v2010.account.Message;
+import com.twilio.type.PhoneNumber;
+
 /**
  * Service for generating and sending renewal reminder messages
  * Supports retry mechanism with idempotency guarantees
@@ -27,6 +30,12 @@ public class MessageService {
     
     @Value("${twilio.enabled:false}")
     private boolean twilioEnabled;
+    
+    @Value("${twilio.phone.number}")
+    private String twilioPhoneNumber;
+    
+    @Value("${twilio.whatsapp.number}")
+    private String twilioWhatsappNumber;
     
     /**
      * Generate a renewal reminder message
@@ -78,14 +87,22 @@ public class MessageService {
     
     @Transactional
     public boolean sendRenewalReminder(Policy policy, String reminderType, int daysUntilExpiry) {
-        boolean smsSent = sendGenericReminder(policy, reminderType, daysUntilExpiry, "SMS");
-        boolean whatsappSent = false;
+        String whatsappNumber = policy.getClient().getWhatsappNumber();
+        String phoneNumber = policy.getClient().getPhoneNumber();
         
-        if (policy.getClient().getWhatsappNumber() != null && !policy.getClient().getWhatsappNumber().isEmpty()) {
-            whatsappSent = sendGenericReminder(policy, reminderType, daysUntilExpiry, "WHATSAPP");
+        boolean hasWhatsapp = whatsappNumber != null && !whatsappNumber.trim().isEmpty();
+        boolean hasSms = phoneNumber != null && !phoneNumber.trim().isEmpty();
+        
+        if (hasWhatsapp) {
+            // If they have WhatsApp, ONLY send via WhatsApp
+            return sendGenericReminder(policy, reminderType, daysUntilExpiry, "WHATSAPP");
+        } else if (hasSms) {
+            // If they only have SMS, send via SMS
+            return sendGenericReminder(policy, reminderType, daysUntilExpiry, "SMS");
+        } else {
+            logger.warn("Cannot send reminder: Client {} has no phone or WhatsApp number.", policy.getClient().getFullName());
+            return false;
         }
-        
-        return smsSent || whatsappSent;
     }
     
     @Transactional
@@ -104,7 +121,7 @@ public class MessageService {
         
         try {
             if (twilioEnabled) {
-                sent = sendViaTwilio(phoneNumber, message);
+                sent = sendViaTwilio(phoneNumber, message, channel);
                 status = sent ? "SENT" : "FAILED";
                 if (!sent) {
                     failureReason = "Twilio returned failure status";
@@ -176,7 +193,7 @@ public class MessageService {
         try {
             boolean sent;
             if (twilioEnabled) {
-                sent = sendViaTwilio(phoneNumber, message);
+                sent = sendViaTwilio(phoneNumber, message, messageLog.getChannel());
             } else {
                 logger.info("MOCK RETRY {}: To {} - {} (attempt {})", 
                     messageLog.getChannel(), phoneNumber, message, messageLog.getRetryCount());
@@ -207,19 +224,43 @@ public class MessageService {
      * Send message via Twilio
      * @param phoneNumber recipient phone number
      * @param message message content
+     * @param channel SMS or WHATSAPP
      * @return true if sent successfully
      */
-    private boolean sendViaTwilio(String phoneNumber, String message) {
-        // TODO: Implement Twilio integration
-        // Example:
-        // Message twilioMessage = Message.creator(
-        //     new PhoneNumber(phoneNumber),
-        //     new PhoneNumber(twilioPhoneNumber),
-        //     message
-        // ).create();
-        // return twilioMessage.getStatus() == Message.Status.SENT;
-        
-        logger.info("Twilio integration pending - message queued");
-        return true;
+    private boolean sendViaTwilio(String phoneNumber, String message, String channel) {
+        try {
+            String fromNumber;
+            String toNumber;
+            
+            if ("WHATSAPP".equalsIgnoreCase(channel)) {
+                // Twilio WhatsApp numbers must be prefixed with "whatsapp:"
+                fromNumber = "whatsapp:" + twilioWhatsappNumber;
+                // Only add prefix if it doesn't already have it
+                toNumber = phoneNumber.startsWith("whatsapp:") ? phoneNumber : "whatsapp:" + phoneNumber;
+            } else {
+                fromNumber = twilioPhoneNumber;
+                toNumber = phoneNumber;
+            }
+            
+            // Ensure numbers have '+' prefix if needed, though usually Twilio handles E.164 natively
+            // But let's assume properties and DB have correctly formatted numbers like +1234567890
+            
+            Message twilioMessage = Message.creator(
+                new PhoneNumber(toNumber),
+                new PhoneNumber(fromNumber),
+                message
+            ).create();
+            
+            logger.info("Twilio message created with SID: {}", twilioMessage.getSid());
+            
+            Message.Status status = twilioMessage.getStatus();
+            // In Twilio, created messages typically have status QUEUED, SENT, or DELIVERED.
+            // FAILED or UNDELIVERED indicate immediate failure.
+            return status != Message.Status.FAILED && status != Message.Status.UNDELIVERED;
+            
+        } catch (Exception e) {
+            logger.error("Failed to send message via Twilio: {}", e.getMessage(), e);
+            return false;
+        }
     }
 }

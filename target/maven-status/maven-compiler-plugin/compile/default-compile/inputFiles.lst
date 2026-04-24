@@ -5,6 +5,7 @@ C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\service\AuthService.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\controller\PolicyController.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\dto\RegistrationRequest.java
+C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\config\TwilioConfig.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\service\PdfExtractionService.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\entity\MessageLog.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\config\SecurityConfig.java
@@ -19,6 +20,7 @@ C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\util\JwtUtil.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\repository\AgentRepository.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\dto\LoginRequest.java
+C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\dto\ManualRenewalRequest.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\entity\Client.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\controller\MessageLogController.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\repository\MessageLogRepository.java

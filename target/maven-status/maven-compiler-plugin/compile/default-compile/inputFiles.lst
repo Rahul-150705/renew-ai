@@ -4,9 +4,12 @@ C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\service\CloudStorageService.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\service\AuthService.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\controller\PolicyController.java
+C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\dto\DashboardSummaryDto.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\dto\RegistrationRequest.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\config\TwilioConfig.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\service\PdfExtractionService.java
+C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\dto\CommunicationStatsDto.java
+C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\controller\DashboardController.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\entity\MessageLog.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\config\SecurityConfig.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\dto\PolicyRequest.java
@@ -14,6 +17,7 @@ C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\dto\PolicyWithClientRequest.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\service\PolicyService.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\service\MessageService.java
+C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\service\DataSeedingService.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\controller\AuthController.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\entity\Policy.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\RenewAiApplication.java
@@ -27,8 +31,12 @@ C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\controller\PdfDownloadController.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\dto\LoginResponse.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\service\RenewalSchedulerService.java
+C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\controller\DataSeedingController.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\controller\PdfExtractionController.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\repository\PolicyRepository.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\dto\ClientRequest.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\dto\PolicyWithClientResponse.java
+C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\service\DashboardService.java
+C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\dto\ChartDataDto.java
 C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\dto\MessageLogDto.java
+C:\Users\Rahul.VASUNDRA\Desktop\project renew\renew-ai\src\main\java\com\renewai\dto\AiInsightDto.java

@@ -8,6 +8,7 @@ import com.renewai.entity.Client;
 import com.renewai.entity.Policy;
 import com.renewai.repository.AgentRepository;
 import com.renewai.repository.ClientRepository;
+import com.renewai.repository.MessageLogRepository;
 import com.renewai.repository.PolicyRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,6 +44,9 @@ public class PolicyService {
 
     @Autowired
     private AgentRepository agentRepository;
+
+    @Autowired
+    private MessageLogRepository messageLogRepository;
 
     // @Autowired  // PDF storage disabled
     // private CloudStorageService cloudStorageService;
@@ -142,31 +146,51 @@ public class PolicyService {
     }
 
     /**
-     * Mark a policy as manually renewed.
+     * Mark a policy as manually renewed or contacted.
      * Used when automated messaging fails after max retries and
      * the agent contacts the customer directly.
      *
      * @param policyId the policy ID
      * @param notes agent's notes about the manual contact
+     * @param renewed whether the contact resulted in a renewal
      * @return updated policy with client information
      */
     @Transactional
-    public PolicyWithClientResponse markAsManuallyRenewed(Long policyId, String notes) {
+    public PolicyWithClientResponse markAsManuallyRenewed(Long policyId, String notes, boolean renewed) {
+        logger.info("Marking policy {} as manually handled. Renewed: {}", policyId, renewed);
+        
         Policy policy = policyRepository.findById(policyId)
                 .orElseThrow(() -> new RuntimeException("Policy not found with id: " + policyId));
 
-        if ("MANUAL_RENEWED".equals(policy.getRenewalStatus())) {
-            throw new IllegalStateException("Policy is already marked as MANUAL_RENEWED");
+        if (renewed) {
+            policy.setRenewalStatus("MANUAL_RENEWED");
+            policy.setStatus("RENEWED");
+            policy.setManualRenewalNotes(notes);
+            policy = policyRepository.save(policy);
+            
+            // Resolve all failed messages for this policy
+            messageLogRepository.resolveFailedMessagesByPolicy(policyId);
+            
+            logger.info("Policy {} manually renewed. Notes: {}", policy.getPolicyNumber(), notes);
+            return mapToResponse(policy, policy.getClient());
+        } else {
+            // If not renewed, we lost the client, so delete the policy as per user request
+            logger.info("Policy {} marked as NOT renewed. Deleting policy as client is lost.", policy.getPolicyNumber());
+            
+            // Delete directly instead of calling internal @Transactional method
+            // PDF storage disabled — S3 deletion commented out
+            // if (policy.getPdfFilePath() != null && !policy.getPdfFilePath().isBlank()) {
+            //     cloudStorageService.deleteFile(policy.getPdfFilePath());
+            // }
+            
+            policyRepository.delete(policy);
+            
+            // Return a dummy response to indicate deletion.
+            PolicyWithClientResponse response = new PolicyWithClientResponse();
+            response.setPolicyId(-1L);
+            response.setPolicyStatus("DELETED");
+            return response;
         }
-
-        policy.setRenewalStatus("MANUAL_RENEWED");
-        policy.setManualRenewalNotes(notes);
-        policy = policyRepository.save(policy);
-
-        logger.info("Policy {} marked as MANUAL_RENEWED by agent. Notes: {}", 
-            policy.getPolicyNumber(), notes);
-
-        return mapToResponse(policy, policy.getClient());
     }
 
     /**

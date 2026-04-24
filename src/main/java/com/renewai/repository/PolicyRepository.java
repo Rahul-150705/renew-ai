@@ -67,4 +67,25 @@ public interface PolicyRepository extends JpaRepository<Policy, Long> {
      */
     @Query("SELECT p FROM Policy p WHERE p.expiryDate < :date AND p.status = 'ACTIVE'")
     List<Policy> findActivePoliciesExpiringBefore(@Param("date") LocalDate date);
+
+    @Query("SELECT COUNT(p) FROM Policy p WHERE p.client.agent.username = :username")
+    long countByAgentUsername(@Param("username") String username);
+
+    @Query("SELECT COUNT(p) FROM Policy p WHERE p.client.agent.username = :username AND p.expiryDate BETWEEN :startDate AND :endDate AND p.status = 'ACTIVE'")
+    long countExpiringSoonByAgent(@Param("username") String username, @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
+
+    @Query("SELECT new com.renewai.dto.ChartDataDto(p.vehicleType, COUNT(p)) FROM Policy p WHERE p.client.agent.username = :username GROUP BY p.vehicleType")
+    List<com.renewai.dto.ChartDataDto> findPolicyDistributionByAgent(@Param("username") String username);
+
+    @Query("SELECT COUNT(p) FROM Policy p WHERE p.client.agent.username = :username AND (p.status = 'RENEWED' OR p.renewalStatus = 'AUTO_RENEWED' OR p.renewalStatus = 'MANUAL_RENEWED')")
+    long countRenewedByAgent(@Param("username") String username);
+
+    @Query("SELECT COUNT(p) FROM Policy p WHERE p.client.agent.username = :username AND p.createdAt BETWEEN :startDate AND :endDate")
+    long countCreatedByAgentBetween(@Param("username") String username, @Param("startDate") java.time.LocalDateTime startDate, @Param("endDate") java.time.LocalDateTime endDate);
+
+    @Query("SELECT SUM(p.premium) FROM Policy p WHERE p.client.agent.username = :username AND p.status = 'ACTIVE'")
+    java.math.BigDecimal sumPremiumByAgent(@Param("username") String username);
+
+    @Query("SELECT p.expiryDate, COUNT(p) FROM Policy p WHERE p.client.agent.username = :username AND p.expiryDate BETWEEN :startDate AND :endDate GROUP BY p.expiryDate ORDER BY p.expiryDate")
+    List<Object[]> findProjectedRenewalsRaw(@Param("username") String username, @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
 }

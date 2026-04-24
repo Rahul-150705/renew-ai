@@ -47,10 +47,13 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 // Public endpoints
                 .requestMatchers("/api/auth/**").permitAll()
-                .requestMatchers("/api/messages/test-scheduler").permitAll()
-                .requestMatchers("/api/messages/logs").permitAll()
-                .requestMatchers("/api/messages/test-twilio").permitAll()
                 .requestMatchers("/error").permitAll()
+                
+                // Protected endpoints
+                .requestMatchers("/api/dashboard/**").authenticated()
+                .requestMatchers("/api/messages/**").authenticated()
+                .requestMatchers("/api/policies/**").authenticated()
+                .requestMatchers("/api/seed/**").authenticated()
                 
                 // Allow preflight OPTIONS requests for all endpoints
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()

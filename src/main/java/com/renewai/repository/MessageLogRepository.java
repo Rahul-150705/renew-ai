@@ -76,4 +76,20 @@ public interface MessageLogRepository extends JpaRepository<MessageLog, Long> {
         @Param("reminderType") String reminderType,
         @Param("channel") String channel
     );
+
+    @Query("SELECT COUNT(ml) FROM MessageLog ml WHERE ml.policy.client.agent.username = :username AND ml.status = 'FAILED'")
+    long countFailedByAgent(@Param("username") String username);
+
+    @Query("SELECT COUNT(ml) FROM MessageLog ml WHERE ml.policy.client.agent.username = :username AND CAST(ml.sentAt AS date) = CURRENT_DATE")
+    long countSentTodayByAgent(@Param("username") String username);
+
+    @Query("SELECT COUNT(ml) FROM MessageLog ml WHERE ml.policy.client.agent.username = :username AND ml.channel = :channel AND ml.status = 'SENT'")
+    long countSuccessByChannelAndAgent(@Param("channel") String channel, @Param("username") String username);
+
+    @Query("SELECT COUNT(ml) FROM MessageLog ml WHERE ml.policy.client.agent.username = :username AND ml.channel = :channel")
+    long countTotalByChannelAndAgent(@Param("channel") String channel, @Param("username") String username);
+
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("UPDATE MessageLog ml SET ml.status = 'RESOLVED' WHERE ml.policy.id = :policyId AND ml.status = 'FAILED'")
+    void resolveFailedMessagesByPolicy(@Param("policyId") Long policyId);
 }

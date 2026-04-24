@@ -9,4 +9,5 @@ import lombok.Data;
 @Data
 public class ManualRenewalRequest {
     private String notes;
+    private boolean renewed;
 }

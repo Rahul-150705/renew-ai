@@ -68,6 +68,24 @@ public class MessageLogController {
     }
 
     /**
+     * POST /api/messages/send-bulk
+     * Triggers the system to scan for expiring policies and send reminders
+     */
+    @PostMapping("/send-bulk")
+    public ResponseEntity<?> sendBulkReminders() {
+        try {
+            renewalSchedulerService.triggerManualReminderCheck();
+            Map<String, String> response = new HashMap<>();
+            response.put("message", "Bulk reminders initiated successfully");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    /**
      * POST /api/messages/{id}/retry
      * 
      * Retry sending a failed message.

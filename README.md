@@ -1,108 +1,169 @@
 refer front end in https://github.com/Rahul-150705/client-connect-hub
 
-# Renew AI — Insurance Renewal Automation Platform
+# 🚀 Renew AI — Insurance Renewal Automation Platform
 
-A Spring Boot backend that automates insurance policy renewal reminders via SMS and WhatsApp, with JWT-based agent authentication, message deduplication, and a retry mechanism for failed deliveries.
-
----
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Features](#features)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Getting Started](#getting-started)
-- [Configuration](#configuration)
-- [API Reference](#api-reference)
-- [Scheduler](#scheduler)
-- [Message Retry Mechanism](#message-retry-mechanism)
-- [Architecture Decisions](#architecture-decisions)
+> Automate insurance renewals, eliminate missed follow-ups, and improve client retention with intelligent messaging workflows.
 
 ---
 
-## Overview
+## 📌 Overview
 
-Renew AI helps insurance agents manage their client policies and automate renewal reminders. When a policy is approaching expiry, the system automatically sends reminder messages via SMS (Twilio) or WhatsApp. Agents can log in, manage policies, view message delivery logs, and manually handle renewals when automation falls short.
+**Renew AI** is a full-stack insurance renewal automation system designed to help agents manage policies and remove manual reminder tracking.
 
----
+It automatically detects expiring policies and sends reminders via **WhatsApp or SMS**, ensuring no renewal opportunity is missed.
 
-## Features
-
-- **JWT Authentication** — Secure agent login and registration with BCrypt password hashing
-- **Policy Management** — Create, update, delete, and view insurance policies with full client details
-- **Automated Reminders** — Spring Scheduler sends reminders 7 days, 3 days, and on the day of expiry
-- **WhatsApp & SMS** — Routes messages to WhatsApp if available, falls back to SMS
-- **Message Deduplication** — Composite unique constraint prevents duplicate messages per policy/channel
-- **Retry Mechanism** — Failed messages can be retried up to 3 times via API
-- **Policy Expiry Tracking** — Daily job marks policies as EXPIRED automatically
-- **Manual Renewal Workflow** — Agents can log manual renewals or remove lost clients
+The system is built with **production-level backend concepts** such as retry mechanisms, idempotency, stateless authentication, and scheduler-driven workflows.
 
 ---
 
-## Tech Stack
+## 🎯 Real-World Impact
+
+- 💰 Prevents revenue loss from missed renewals
+- ⏱️ Eliminates manual follow-up tracking
+- 📈 Improves customer retention with timely reminders
+- 🧠 Demonstrates real SaaS backend architecture (scheduler + retry + messaging system)
+
+---
+
+## 🖥️ Demo & Screenshots
+
+### 🎥 Demo Video
+[Watch Demo](https://your-demo-link.com)
+
+---
+
+### 📸 Screenshots
+
+#### Dashboard
+![Dashboard](./screenshots/dashboard.png)
+
+#### Create Policy
+![Create Policy](./screenshots/create-policy.png)
+
+#### Message Logs
+![Message Logs](./screenshots/message-logs.png)
+
+#### Login Page
+![Login](./screenshots/login.png)
+
+---
+
+## ✨ Key Features
+
+### 🔐 Authentication & Security
+- JWT-based authentication (stateless sessions)
+- BCrypt password hashing
+- Agent-scoped data isolation (multi-tenant safe)
+
+---
+
+### 📋 Policy Management
+- Full CRUD operations for insurance policies
+- Tracks client details, premium, insurer, and expiry dates
+- Manual renewal workflow (renewed / lost clients)
+
+---
+
+### ⏰ Smart Reminder System
+- Automated reminders at:
+  - 7 days before expiry
+  - 3 days before expiry
+  - On expiry day
+- Cron-based scheduling using Spring `@Scheduled`
+
+---
+
+### 💬 Messaging Engine
+- WhatsApp-first delivery strategy
+- SMS fallback mechanism
+- Twilio integration (mock mode available for development)
+
+---
+
+### 🔁 Retry Mechanism
+- Retry failed messages up to **3 times**
+- Tracks:
+  - Retry count
+  - Failure reason
+  - Last attempt timestamp
+- Prevents duplicate sends using idempotency checks
+
+---
+
+### 🧠 Idempotency & Data Integrity
+- Composite unique constraint: `(policy_id, reminder_type, channel)`
+- Ensures no duplicate reminders are sent
+
+---
+
+## 🏗️ Architecture
+
+```
+React Frontend
+      ↓
+Spring Boot Backend
+      ↓
+PostgreSQL Database
+      ↓
+Scheduler Service
+      ↓
+Twilio API (SMS / WhatsApp)
+```
+
+---
+
+## 🛠️ Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Framework | Spring Boot 3.x |
-| Security | Spring Security + JWT (jjwt) |
+| Frontend | React |
+| Backend | Spring Boot 3 |
+| Security | Spring Security + JWT |
 | Database | PostgreSQL (Neon DB) |
 | ORM | Spring Data JPA / Hibernate |
 | Messaging | Twilio (SMS & WhatsApp) |
 | Scheduler | Spring `@Scheduled` |
-| Build | Maven |
-| Java Version | Java 17+ |
+| Build Tool | Maven |
+| Java | Java 17+ |
 
 ---
 
-## Project Structure
+## 📂 Project Structure
 
 ```
 src/main/java/com/renewai/
 ├── config/
-│   ├── JwtAuthenticationFilter.java   # Intercepts requests and validates JWT
-│   └── SecurityConfig.java            # Security rules, CORS, session policy
 ├── controller/
-│   ├── AuthController.java            # POST /api/auth/login, /register
-│   ├── PolicyController.java          # CRUD for policies
-│   └── MessageLogController.java      # Message logs, retry, bulk send
-├── dto/                               # Request/Response data transfer objects
+├── dto/
 ├── entity/
-│   ├── Agent.java                     # Insurance agent (system user)
-│   ├── Client.java                    # Policy holder
-│   ├── Policy.java                    # Insurance policy
-│   └── MessageLog.java                # Sent message record with retry state
-├── repository/                        # Spring Data JPA repositories
+├── repository/
 ├── service/
-│   ├── AuthService.java               # Login and registration logic
-│   ├── PolicyService.java             # Policy CRUD and business logic
-│   ├── MessageService.java            # Message generation and Twilio dispatch
-│   └── RenewalSchedulerService.java   # Scheduled jobs
 └── util/
-    └── JwtUtil.java                   # Token generation and validation
 ```
 
 ---
 
-## Getting Started
+## ⚙️ Getting Started
 
 ### Prerequisites
 
 - Java 17+
 - Maven 3.8+
-- PostgreSQL database (or a Neon DB connection string)
-- Twilio account (optional — mock mode works without it)
+- PostgreSQL (or Neon DB)
+- Twilio account (optional)
 
-### 1. Clone the repository
+---
+
+### 1. Clone Repository
 
 ```bash
 git clone https://github.com/your-org/renew-ai.git
 cd renew-ai
 ```
 
-### 2. Set up environment variables
+### 2. Environment Variables
 
-Create a `.env` file (or set these as system environment variables):
+Create a `.env` file:
 
 ```env
 DB_URL=jdbc:postgresql://<host>/<dbname>?sslmode=require
@@ -120,159 +181,95 @@ TWILIO_WHATSAPP_NUMBER=+1234567890
 ALLOWED_ORIGINS=http://localhost:3000
 ```
 
-### 3. Build and run
+### 3. Run Application
 
 ```bash
 mvn clean install
 mvn spring-boot:run
 ```
 
-The server starts on **http://localhost:8080**.
+Server runs at: **http://localhost:8080**
 
 ---
 
-## Configuration
+## 📡 API Overview
 
-Key settings in `application.properties`:
-
-| Property | Default | Description |
-|---|---|---|
-| `server.port` | `8080` | HTTP port |
-| `jwt.expiration` | `86400000` | Token TTL in ms (24 hours) |
-| `renewal.scheduler.cron` | `0 0 9 * * ?` | Reminder job — runs daily at 9:00 AM |
-| `twilio.enabled` | `false` | Set to `true` to send real messages |
-| `spring.jpa.hibernate.ddl-auto` | `update` | Schema management strategy |
-
-When `twilio.enabled=false`, all messages are logged to console in mock mode — useful for local development.
-
----
-
-## API Reference
-
-All protected endpoints require the `Authorization: Bearer <token>` header.
-
-### Authentication (Public)
+### 🔓 Public Endpoints
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/api/auth/login` | Agent login — returns JWT token |
-| `POST` | `/api/auth/register` | Register a new agent |
-| `GET` | `/api/auth/health` | Service health check |
+| `POST` | `/api/auth/login` | Agent login |
+| `POST` | `/api/auth/register` | Register agent |
+| `GET` | `/api/auth/health` | Health check |
 
-**Login request body:**
-```json
-{
-  "username": "agent1",
-  "password": "yourpassword"
-}
+### 🔒 Protected Endpoints
+
+**Policies**
+
+```
+GET    /api/policies
+POST   /api/policies/create
+PUT    /api/policies/{id}/status
+POST   /api/policies/{id}/manual-renew
+DELETE /api/policies/{id}
 ```
 
-**Login response:**
-```json
-{
-  "token": "eyJhbGci...",
-  "tokenType": "Bearer",
-  "agentId": 1,
-  "username": "agent1",
-  "fullName": "John Smith",
-  "email": "john@example.com"
-}
+**Messages**
+
 ```
-
-### Policies (Protected)
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/policies` | List all policies for the logged-in agent |
-| `POST` | `/api/policies/create` | Create a new policy with client details |
-| `GET` | `/api/policies/{id}` | Get a single policy by ID |
-| `PUT` | `/api/policies/{id}/status` | Update policy status |
-| `POST` | `/api/policies/{id}/manual-renew` | Mark as manually renewed or lost |
-| `DELETE` | `/api/policies/{id}` | Delete a policy |
-
-**Create policy request body:**
-```json
-{
-  "clientFullName": "Jane Doe",
-  "clientEmail": "jane@example.com",
-  "clientPhoneNumber": "+919876543210",
-  "clientWhatsappNumber": "+919876543210",
-  "policyNumber": "POL-2024-001",
-  "policyType": "VEHICLE",
-  "vehicleType": "Car",
-  "registrationNumber": "TN01AB1234",
-  "insurerName": "HDFC Ergo",
-  "startDate": "2024-01-01",
-  "expiryDate": "2025-01-01",
-  "premium": 15000.00,
-  "premiumFrequency": "YEARLY"
-}
-```
-
-### Messages (Protected)
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/messages/logs` | Retrieve all message logs (newest first) |
-| `POST` | `/api/messages/send-bulk` | Manually trigger the renewal scheduler |
-| `POST` | `/api/messages/test-scheduler` | Alias for manual scheduler trigger |
-| `POST` | `/api/messages/{id}/retry` | Retry a failed message |
-
----
-
-## Scheduler
-
-Two cron jobs run automatically every day:
-
-**8:00 AM — Expiry Job** (`updateExpiredPolicies`)
-Scans all active policies and marks any that have passed their expiry date as `EXPIRED`.
-
-**9:00 AM — Reminder Job** (`checkExpiringPoliciesAndSendReminders`)
-Sends reminders in three waves:
-- Policies expiring in **7 days** → `SEVEN_DAYS` reminder
-- Policies expiring in **3 days** → `THREE_DAYS` reminder
-- Policies expiring **today** → `EXPIRY_DAY` final notice
-
-If a reminder has already been sent for a given policy/type/channel combination, it is skipped automatically (idempotent).
-
----
-
-## Message Retry Mechanism
-
-Failed messages can be retried via `POST /api/messages/{id}/retry`.
-
-Business rules:
-- Only messages with status `FAILED` can be retried
-- Maximum **3 retry attempts** per message (`MessageLog.MAX_RETRY_COUNT`)
-- Each attempt updates `retryCount`, `lastAttemptAt`, and `failureReason`
-- If a `SENT` record already exists for the same policy/reminder/channel, the retry is rejected (idempotency guard)
-
-The `MessageLogDto` response includes helper fields for the frontend:
-
-```json
-{
-  "id": 5,
-  "status": "FAILED",
-  "retryCount": 2,
-  "canRetry": true,
-  "maxRetriesExhausted": false,
-  "failureReason": "Twilio returned failure status",
-  "lastAttemptAt": "2026-04-21T10:30:00"
-}
+GET  /api/messages/logs
+POST /api/messages/send-bulk
+POST /api/messages/{id}/retry
 ```
 
 ---
 
-## Architecture Decisions
+## ⏳ Scheduler Jobs
 
-**Stateless sessions** — JWT tokens are validated on every request. No server-side session state is stored, making horizontal scaling straightforward.
+| Time | Job |
+|---|---|
+| 8:00 AM | Mark expired policies |
+| 9:00 AM | Send renewal reminders |
 
-**Message deduplication** — A composite unique constraint on `(policy_id, reminder_type, channel)` at the database level prevents duplicate reminders even if the scheduler runs more than once.
+Reminder types: `SEVEN_DAYS` · `THREE_DAYS` · `EXPIRY_DAY`
 
-**WhatsApp-first routing** — If a client has a WhatsApp number, only WhatsApp is used. SMS is the fallback. This avoids sending the same reminder twice to the same person on different channels.
+---
 
-**Mock mode** — Setting `twilio.enabled=false` routes all messages to the application log instead of Twilio. This makes local development and testing possible without any Twilio credentials.
+## 🔁 Retry Logic
 
-**Agent-scoped data** — All policies are fetched through the agent context (`Authentication.getName()`), so agents can only see their own clients and policies.
+- Only `FAILED` messages can be retried
+- Maximum retry limit: **3 attempts**
+- Prevents duplicate sends if already successful
+- Tracks failure reasons for debugging
 
-**Manual renewal workflow** — When automated messaging fails and the agent contacts the customer directly, they can mark the policy as `MANUAL_RENEWED`. If the client did not renew, the policy is deleted, keeping the database clean.
+---
+
+## 🧠 Architecture Decisions
+
+- **Stateless Authentication** → scalable and horizontally scalable
+- **Idempotency via DB constraints** → avoids duplicate reminders
+- **WhatsApp-first strategy** → avoids multi-channel spam
+- **Mock mode support** → enables local development without Twilio
+- **Agent-scoped data** → secure multi-user system
+
+---
+
+## 🚀 Future Improvements
+
+- 📊 Analytics dashboard (renewal success rate, delivery stats)
+- 🤖 AI-based message personalization (LLM integration)
+- 📅 Smart reminder optimization based on user behavior
+- 🌐 Multi-tenant SaaS deployment
+- 📲 Mobile app integration
+
+---
+
+## 🧑‍💻 Author
+
+**Rahul P**
+
+---
+
+## ⭐ Support
+
+If you found this project useful, consider giving it a ⭐ on GitHub!

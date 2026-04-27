@@ -380,28 +380,4 @@ public class PolicyService {
     public Policy savePolicy(Policy policy) {
         return policyRepository.save(policy);
     }
-
-    public Object debugMyPolicies(String username) {
-        Agent agent = agentRepository.findByUsername(username)
-                .or(() -> agentRepository.findByEmail(username))
-                .orElseThrow(() -> new RuntimeException("Agent not found"));
-        
-        List<Policy> policies = policyRepository.findByAgentId(agent.getId());
-        
-        // Calculate some stats for the response
-        long activeCount = policies.stream().filter(p -> "ACTIVE".equals(p.getStatus())).count();
-        long expiringSoon = policies.stream().filter(p -> {
-            LocalDate soon = LocalDate.now().plusDays(30);
-            return "ACTIVE".equals(p.getStatus()) && !p.getExpiryDate().isBefore(LocalDate.now()) && !p.getExpiryDate().isAfter(soon);
-        }).count();
-        
-        return java.util.Map.of(
-            "agentId", agent.getId(),
-            "username", agent.getUsername(),
-            "policyCount", policies.size(),
-            "activeCount", activeCount,
-            "expiringSoonCount", expiringSoon,
-            "policies", policies
-        );
-    }
 }

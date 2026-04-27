@@ -27,11 +27,6 @@ public class PolicyController {
         return ResponseEntity.ok(policyService.getAllPoliciesForAgent(authentication.getName()));
     }
 
-    @GetMapping("/debug/my-policies")
-    public ResponseEntity<?> debugMyPolicies(Authentication authentication) {
-        return ResponseEntity.ok(policyService.debugMyPolicies(authentication.getName()));
-    }
-
     @PostMapping("/create")
     public ResponseEntity<PolicyWithClientResponse> createPolicy(
             @RequestBody PolicyWithClientRequest request,

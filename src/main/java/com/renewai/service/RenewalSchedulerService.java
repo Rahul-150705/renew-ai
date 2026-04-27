@@ -1,6 +1,8 @@
 package com.renewai.service;
 
+import com.renewai.entity.MessageLog;
 import com.renewai.entity.Policy;
+import com.renewai.repository.MessageLogRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,22 +12,6 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.util.List;
 
-/**
- * Renewal Scheduler Service
- * 
- * WHY USE SCHEDULER?
- * - Automates the renewal reminder process without manual intervention
- * - Runs at a fixed time daily (9:00 AM) to check for expiring policies
- * - Ensures timely reminders are sent to clients
- * - Reduces agent workload by automating repetitive tasks
- * - Provides consistent, reliable reminder delivery
- * 
- * This service runs a scheduled job daily to:
- * 1. Find policies expiring in 7 days
- * 2. Find policies expiring in 3 days
- * 3. Send renewal reminders via MessageService
- * 4. Prevent duplicate messages using MessageLog
- */
 @Service
 public class RenewalSchedulerService {
     
@@ -36,19 +22,12 @@ public class RenewalSchedulerService {
     
     @Autowired
     private MessageService messageService;
+
+    @Autowired
+    private MessageLogRepository messageLogRepository;
     
     /**
-     * Scheduled job to check for expiring policies and send reminders
-     * 
-     * Cron Expression: 0 0 9 * * ?
-     * - Second: 0
-     * - Minute: 0
-     * - Hour: 9 (9:00 AM)
-     * - Day of Month: * (every day)
-     * - Month: * (every month)
-     * - Day of Week: ? (any day)
-     * 
-     * This runs every day at 9:00 AM
+     * Scheduled job to mark policies as EXPIRED
      */
     @Scheduled(cron = "0 0 8 * * ?")
     public void updateExpiredPolicies() {
@@ -70,16 +49,6 @@ public class RenewalSchedulerService {
 
     /**
      * Scheduled job to check for expiring policies and send reminders
-     * 
-     * Cron Expression: 0 0 9 * * ?
-     * - Second: 0
-     * - Minute: 0
-     * - Hour: 9 (9:00 AM)
-     * - Day of Month: * (every day)
-     * - Month: * (every month)
-     * - Day of Week: ? (any day)
-     * 
-     * This runs every day at 9:00 AM
      */
     @Scheduled(cron = "${renewal.scheduler.cron}")
     public void checkExpiringPoliciesAndSendReminders() {
@@ -90,84 +59,70 @@ public class RenewalSchedulerService {
         LocalDate threeDaysLater = today.plusDays(3);
         
         try {
-            // Process 7-day reminders
             processReminders(sevenDaysLater, "SEVEN_DAYS", 7);
-            
-            // Process 3-day reminders
             processReminders(threeDaysLater, "THREE_DAYS", 3);
-            
-            // Process 0-day reminders (Expiry Day)
             processReminders(today, "EXPIRY_DAY", 0);
             
             logger.info("=== Daily renewal reminder job completed successfully ===");
             
+            // Trigger auto-retry immediately after daily job
+            autoRetryFailedMessages();
+            
         } catch (Exception e) {
-            // FAILURE HANDLING:
-            // Log error but don't crash the scheduler
-            // Next execution will retry failed messages
             logger.error("Error in renewal reminder job: " + e.getMessage(), e);
         }
     }
-    
+
     /**
-     * Process reminders for a specific expiry date
-     * @param expiryDate the expiry date to check
-     * @param reminderType SEVEN_DAYS or THREE_DAYS
-     * @param daysUntilExpiry days until expiry
+     * AUTO-RETRY TASK
+     * Runs every hour to automatically retry failed WhatsApp/SMS messages.
+     * Cap: 3 attempts total (MessageLog.MAX_RETRY_COUNT)
      */
-    private void processReminders(LocalDate expiryDate, String reminderType, int daysUntilExpiry) {
-        logger.info("Processing {} reminders for date: {}", reminderType, expiryDate);
+    @Scheduled(fixedDelay = 3600000) // 1 hour
+    public void autoRetryFailedMessages() {
+        logger.info("=== Starting automatic message retry job ===");
         
-        // Find policies expiring on this date
-        List<Policy> expiringPolicies = policyService.getPoliciesExpiringOn(expiryDate);
+        List<MessageLog> retryable = messageLogRepository.findRetryableMessages(MessageLog.MAX_RETRY_COUNT);
         
-        if (expiringPolicies.isEmpty()) {
-            logger.info("No policies expiring on {}", expiryDate);
+        if (retryable.isEmpty()) {
+            logger.info("No failed messages found for retry.");
             return;
         }
         
-        logger.info("Found {} policies expiring on {}", expiringPolicies.size(), expiryDate);
+        logger.info("Found {} failed messages eligible for retry.", retryable.size());
         
-        int sentCount = 0;
-        int skippedCount = 0;
-        int failedCount = 0;
-        
-        // Process each policy
-        for (Policy policy : expiringPolicies) {
+        int successCount = 0;
+        for (MessageLog log : retryable) {
             try {
-                boolean sent = messageService.sendRenewalReminder(policy, reminderType, daysUntilExpiry);
-                
-                if (sent) {
-                    sentCount++;
-                    logger.info("Reminder sent for policy: {} to {}", 
-                        policy.getPolicyNumber(), 
-                        policy.getClient().getPhoneNumber());
-                } else {
-                    skippedCount++;
-                    logger.debug("Reminder skipped (already sent) for policy: {}", 
-                        policy.getPolicyNumber());
+                MessageLog result = messageService.retryMessage(log.getId());
+                if ("SENT".equals(result.getStatus())) {
+                    successCount++;
                 }
-                
             } catch (Exception e) {
-                failedCount++;
-                logger.error("Failed to send reminder for policy {}: {}", 
-                    policy.getPolicyNumber(), 
-                    e.getMessage());
+                logger.error("Auto-retry failed for message log ID {}: {}", log.getId(), e.getMessage());
             }
         }
         
-        logger.info("{} Summary - Total: {}, Sent: {}, Skipped: {}, Failed: {}", 
-            reminderType, 
-            expiringPolicies.size(), 
-            sentCount, 
-            skippedCount, 
-            failedCount);
+        logger.info("=== Auto-retry job finished. Success: {}/{} ===", successCount, retryable.size());
     }
     
-    /**
-     * Manual trigger for testing (optional)
-     * Can be called via API endpoint for testing purposes
-     */
+    private void processReminders(LocalDate expiryDate, String reminderType, int daysUntilExpiry) {
+        logger.info("Processing {} reminders for date: {}", reminderType, expiryDate);
+        List<Policy> expiringPolicies = policyService.getPoliciesExpiringOn(expiryDate);
+        
+        if (expiringPolicies.isEmpty()) {
+            return;
+        }
+        
+        for (Policy policy : expiringPolicies) {
+            try {
+                messageService.sendRenewalReminder(policy, reminderType, daysUntilExpiry);
+            } catch (Exception e) {
+                logger.error("Failed to send reminder for policy {}: {}", policy.getPolicyNumber(), e.getMessage());
+            }
+        }
+    }
+    
     public void triggerManualReminderCheck() {
         logger.info("=== Manual trigger initiated ===");
         checkExpiringPoliciesAndSendReminders();

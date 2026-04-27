@@ -77,17 +77,17 @@ public interface MessageLogRepository extends JpaRepository<MessageLog, Long> {
         @Param("channel") String channel
     );
 
-    @Query("SELECT COUNT(ml) FROM MessageLog ml WHERE ml.policy.client.agent.username = :username AND ml.status = 'FAILED'")
-    long countFailedByAgent(@Param("username") String username);
+    @Query("SELECT COUNT(ml) FROM MessageLog ml WHERE ml.policy.client.agent.id = :agentId AND ml.status = 'FAILED'")
+    long countFailedByAgentId(@Param("agentId") Long agentId);
 
-    @Query("SELECT COUNT(ml) FROM MessageLog ml WHERE ml.policy.client.agent.username = :username AND CAST(ml.sentAt AS date) = CURRENT_DATE")
-    long countSentTodayByAgent(@Param("username") String username);
+    @Query("SELECT COUNT(ml) FROM MessageLog ml WHERE ml.policy.client.agent.id = :agentId AND CAST(ml.sentAt AS date) = CURRENT_DATE")
+    long countSentTodayByAgentId(@Param("agentId") Long agentId);
 
-    @Query("SELECT COUNT(ml) FROM MessageLog ml WHERE ml.policy.client.agent.username = :username AND ml.channel = :channel AND ml.status = 'SENT'")
-    long countSuccessByChannelAndAgent(@Param("channel") String channel, @Param("username") String username);
+    @Query("SELECT COUNT(ml) FROM MessageLog ml WHERE ml.policy.client.agent.id = :agentId AND ml.channel = :channel AND ml.status = 'SENT'")
+    long countSuccessByChannelAndAgentId(@Param("channel") String channel, @Param("agentId") Long agentId);
 
-    @Query("SELECT COUNT(ml) FROM MessageLog ml WHERE ml.policy.client.agent.username = :username AND ml.channel = :channel")
-    long countTotalByChannelAndAgent(@Param("channel") String channel, @Param("username") String username);
+    @Query("SELECT COUNT(ml) FROM MessageLog ml WHERE ml.policy.client.agent.id = :agentId AND ml.channel = :channel")
+    long countTotalByChannelAndAgentId(@Param("channel") String channel, @Param("agentId") Long agentId);
 
     @org.springframework.data.jpa.repository.Modifying
     @Query("UPDATE MessageLog ml SET ml.status = 'RESOLVED' WHERE ml.policy.id = :policyId AND ml.status = 'FAILED'")

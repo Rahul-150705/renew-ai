@@ -1,5 +1,6 @@
 package com.renewai.controller;
 
+import com.renewai.dto.ConfirmRenewalRequest;
 import com.renewai.dto.ManualRenewalRequest;
 import com.renewai.dto.PolicyWithClientRequest;
 import com.renewai.dto.PolicyWithClientResponse;
@@ -8,12 +9,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.CrossOrigin;
 
 import java.util.List;
 import java.util.Map;
 
 @RestController
 @RequestMapping("/api/policies")
+@CrossOrigin(origins = "*", maxAge = 3600)
 public class PolicyController {
 
     @Autowired
@@ -22,6 +25,11 @@ public class PolicyController {
     @GetMapping
     public ResponseEntity<List<PolicyWithClientResponse>> getAllPolicies(Authentication authentication) {
         return ResponseEntity.ok(policyService.getAllPoliciesForAgent(authentication.getName()));
+    }
+
+    @GetMapping("/debug/my-policies")
+    public ResponseEntity<?> debugMyPolicies(Authentication authentication) {
+        return ResponseEntity.ok(policyService.debugMyPolicies(authentication.getName()));
     }
 
     @PostMapping("/create")
@@ -48,6 +56,13 @@ public class PolicyController {
             @PathVariable Long id,
             @RequestBody ManualRenewalRequest request) {
         return ResponseEntity.ok(policyService.markAsManuallyRenewed(id, request.getNotes(), request.isRenewed()));
+    }
+
+    @PostMapping("/{id}/confirm-renewal")
+    public ResponseEntity<PolicyWithClientResponse> confirmRenewal(
+            @PathVariable Long id,
+            @RequestBody ConfirmRenewalRequest request) {
+        return ResponseEntity.ok(policyService.confirmAndRenew(id, request));
     }
 
     @DeleteMapping("/{id}")

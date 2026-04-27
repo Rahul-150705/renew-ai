@@ -92,4 +92,11 @@ public interface MessageLogRepository extends JpaRepository<MessageLog, Long> {
     @org.springframework.data.jpa.repository.Modifying
     @Query("UPDATE MessageLog ml SET ml.status = 'RESOLVED' WHERE ml.policy.id = :policyId AND ml.status = 'FAILED'")
     void resolveFailedMessagesByPolicy(@Param("policyId") Long policyId);
+
+    @Query("SELECT COUNT(ml) FROM MessageLog ml WHERE ml.policy.client.agent.id = :agentId AND ml.retryCount >= 3 AND ml.status = 'FAILED'")
+    long countExhaustedRetries(@Param("agentId") Long agentId);
+
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("DELETE FROM MessageLog ml WHERE ml.policy.id = :policyId")
+    void deleteByPolicyId(@Param("policyId") Long policyId);
 }

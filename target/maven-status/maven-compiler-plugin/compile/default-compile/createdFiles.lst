@@ -1,4 +1,5 @@
 com\renewai\dto\ManualRenewalRequest.class
+com\renewai\config\CorsConfig.class
 com\renewai\service\RenewalSchedulerService.class
 com\renewai\dto\MessageLogDto.class
 com\renewai\controller\DashboardController.class
@@ -23,6 +24,7 @@ com\renewai\config\TwilioConfig.class
 com\renewai\entity\Agent.class
 com\renewai\repository\AgentRepository.class
 com\renewai\dto\LoginRequest.class
+com\renewai\exception\GlobalExceptionHandler.class
 com\renewai\controller\PdfDownloadController.class
 com\renewai\service\CloudStorageService.class
 com\renewai\dto\AiInsightDto.class
@@ -30,12 +32,14 @@ com\renewai\service\AuthService.class
 com\renewai\dto\ChartDataDto.class
 com\renewai\config\JwtAuthenticationFilter.class
 com\renewai\dto\CommunicationStatsDto.class
+com\renewai\dto\ConfirmRenewalRequest.class
 com\renewai\service\PolicyService.class
 com\renewai\entity\Policy.class
 com\renewai\repository\MessageLogRepository.class
 com\renewai\dto\ClientRequest.class
 com\renewai\repository\PolicyRepository.class
 com\renewai\controller\AuthController.class
+com\renewai\exception\ResourceNotFoundException.class
 com\renewai\repository\ClientRepository.class
 com\renewai\dto\PolicyWithClientResponse.class
 com\renewai\entity\Client.class

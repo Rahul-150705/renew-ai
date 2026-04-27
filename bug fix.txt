@@ -1,0 +1,32 @@
+BUG FIX LOG - RENEW AI DASHBOARD REVENUE
+==========================================
+
+PROBLEM: 
+The "Active Premium" stat on the dashboard was displaying as "₹0.0L" even when active policies existed.
+
+ROOT CAUSES:
+1. Formatting Divisor Error (Frontend):
+   - The code was dividing the total premium by 10,000,000 (1 Crore) instead of 100,000 (1 Lakh).
+   - Example: A ₹50,000 premium divided by 10M = 0.005. Rounded to one decimal place, this displayed as 0.0L.
+
+2. Null Propagation (Backend):
+   - SQL's SUM() function returns NULL if no matching rows are found or if the agent is new.
+   - This NULL value was being passed to the frontend, which defaulted to 0 or caused the calculation to break.
+
+3. Missing Status Filter (Backend):
+   - The original query was summing ALL policies in the database, including expired, cancelled, and renewed ones. "Active Premium" should only reflect policies currently in 'ACTIVE' status.
+
+FIXES APPLIED:
+1. PolicyRepository.java:
+   - Updated queries to use COALESCE(SUM(p.premium), 0) to guarantee a numeric return (0) instead of NULL.
+   - Added 'AND p.status = 'ACTIVE'' to the summation queries to ensure only live revenue is tracked.
+
+2. DashboardService.java:
+   - Implemented explicit null-checks and BigDecimal.ZERO fallbacks for all financial calculations.
+
+3. Dashboard.tsx (Frontend):
+   - Corrected the divisor from 10,000,000 to 100,000 to accurately represent Lakhs in the Indian numbering system.
+   - Added null-coalescing (stats.activePremium || 0) to ensure the UI always has a number to render.
+
+RESULT:
+The dashboard now accurately displays current active portfolio premium in Lakhs (₹L) and correctly calculates growth trends.

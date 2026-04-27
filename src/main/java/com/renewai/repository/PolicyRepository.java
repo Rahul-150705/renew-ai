@@ -68,11 +68,18 @@ public interface PolicyRepository extends JpaRepository<Policy, Long> {
     @Query("SELECT p FROM Policy p WHERE p.expiryDate < :date AND p.status = 'ACTIVE'")
     List<Policy> findActivePoliciesExpiringBefore(@Param("date") LocalDate date);
 
+    @Query("SELECT p FROM Policy p WHERE p.client.agent.id = :agentId")
+    List<Policy> findByAgentId(@Param("agentId") Long agentId);
+
     @Query("SELECT COUNT(p) FROM Policy p WHERE p.client.agent.id = :agentId")
     long countByAgentId(@Param("agentId") Long agentId);
 
-    @Query("SELECT COUNT(p) FROM Policy p WHERE p.client.agent.id = :agentId AND p.expiryDate BETWEEN :startDate AND :endDate AND p.status = 'ACTIVE'")
-    long countExpiringSoonByAgentId(@Param("agentId") Long agentId, @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
+    @Query(value = "SELECT COUNT(p) FROM policies p " +
+           "JOIN clients c ON p.client_id = c.id " +
+           "WHERE c.agent_id = :agentId " +
+           "AND p.status = 'ACTIVE' " +
+           "AND p.expiry_date BETWEEN :startDate AND :endDate", nativeQuery = true)
+    long countExpiringSoonByAgentId(@Param("agentId") Long agentId, @Param("startDate") java.time.LocalDate startDate, @Param("endDate") java.time.LocalDate endDate);
 
     @Query("SELECT new com.renewai.dto.ChartDataDto(p.vehicleType, COUNT(p)) FROM Policy p WHERE p.client.agent.id = :agentId GROUP BY p.vehicleType")
     List<com.renewai.dto.ChartDataDto> findPolicyDistributionByAgentId(@Param("agentId") Long agentId);
@@ -80,19 +87,85 @@ public interface PolicyRepository extends JpaRepository<Policy, Long> {
     @Query("SELECT COUNT(p) FROM Policy p WHERE p.client.agent.id = :agentId AND (p.status = 'RENEWED' OR p.renewalStatus = 'AUTO_RENEWED' OR p.renewalStatus = 'MANUAL_RENEWED')")
     long countRenewedByAgentId(@Param("agentId") Long agentId);
 
+    @Query(value = "SELECT COUNT(p) FROM policies p " +
+           "JOIN clients c ON p.client_id = c.id " +
+           "WHERE c.agent_id = :agentId " +
+           "AND (p.status = 'RENEWED' OR p.renewal_status = 'AUTO_RENEWED' OR p.renewal_status = 'MANUAL_RENEWED') " +
+           "AND p.expiry_date BETWEEN :startDate AND :endDate", nativeQuery = true)
+    long countRenewedByAgentBetween(@Param("agentId") Long agentId, @Param("startDate") java.time.LocalDate startDate, @Param("endDate") java.time.LocalDate endDate);
+
     @Query("SELECT COUNT(p) FROM Policy p WHERE p.client.agent.id = :agentId AND p.createdAt BETWEEN :startDate AND :endDate")
     long countCreatedByAgentBetween(@Param("agentId") Long agentId, @Param("startDate") java.time.LocalDateTime startDate, @Param("endDate") java.time.LocalDateTime endDate);
 
-    @Query("SELECT SUM(p.premium) FROM Policy p WHERE p.client.agent.id = :agentId")
+    @Query("SELECT COALESCE(SUM(p.premium), 0) FROM Policy p WHERE p.client.agent.id = :agentId AND p.status = 'ACTIVE'")
     java.math.BigDecimal sumPremiumByAgentId(@Param("agentId") Long agentId);
+
+    @Query(value = "SELECT COALESCE(SUM(p.premium), 0) FROM policies p " +
+           "JOIN clients c ON p.client_id = c.id " +
+           "WHERE c.agent_id = :agentId " +
+           "AND p.status = 'ACTIVE' " +
+           "AND p.expiry_date BETWEEN :startDate AND :endDate", nativeQuery = true)
+    java.math.BigDecimal sumPremiumForExpiringPoliciesInRange(@Param("agentId") Long agentId, @Param("startDate") java.time.LocalDate startDate, @Param("endDate") java.time.LocalDate endDate);
+
+    @Query(value = "SELECT COALESCE(SUM(p.premium), 0) FROM policies p " +
+           "JOIN clients c ON p.client_id = c.id " +
+           "WHERE c.agent_id = :agentId " +
+           "AND p.status = 'ACTIVE' " +
+           "AND EXTRACT(MONTH FROM p.created_at) = EXTRACT(MONTH FROM CURRENT_DATE) " +
+           "AND EXTRACT(YEAR FROM p.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)", nativeQuery = true)
+    java.math.BigDecimal sumActivePremiumThisMonth(@Param("agentId") Long agentId);
+
+    @Query(value = "SELECT COALESCE(SUM(p.premium), 0) FROM policies p " +
+           "JOIN clients c ON p.client_id = c.id " +
+           "WHERE c.agent_id = :agentId " +
+           "AND p.status = 'ACTIVE' " +
+           "AND p.created_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') " +
+           "AND p.created_at < DATE_TRUNC('month', CURRENT_DATE)", nativeQuery = true)
+    java.math.BigDecimal sumActivePremiumLastMonth(@Param("agentId") Long agentId);
 
     @Query("SELECT p.expiryDate, COUNT(p) FROM Policy p WHERE p.client.agent.id = :agentId AND p.expiryDate BETWEEN :startDate AND :endDate GROUP BY p.expiryDate ORDER BY p.expiryDate")
     List<Object[]> findProjectedRenewalsRaw(@Param("agentId") Long agentId, @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
 
-    @Query("SELECT MONTH(p.createdAt) as month, SUM(p.premium) as revenue " +
-           "FROM Policy p WHERE p.client.agent.id = :agentId " +
-           "AND p.createdAt >= :startDate " +
-           "GROUP BY MONTH(p.createdAt) " +
-           "ORDER BY MONTH(p.createdAt)")
+    @Query(value = "SELECT CAST(EXTRACT(MONTH FROM p.created_at) AS INTEGER) as month, COALESCE(SUM(p.premium), 0) as revenue " +
+           "FROM policies p " +
+           "JOIN clients c ON p.client_id = c.id " +
+           "WHERE c.agent_id = :agentId " +
+           "AND p.created_at >= :startDate " +
+           "GROUP BY month " +
+           "ORDER BY month", nativeQuery = true)
     List<Object[]> findMonthlyRevenueRaw(@Param("agentId") Long agentId, @Param("startDate") java.time.LocalDateTime startDate);
+
+    @Query("SELECT COUNT(p) FROM Policy p WHERE p.client.agent.id = :agentId AND p.status = 'EXPIRED' AND p.renewalStatus = 'PENDING'")
+    long countLostPoliciesByAgentId(@Param("agentId") Long agentId);
+
+    @Query(value = "SELECT COUNT(p) FROM policies p " +
+           "JOIN clients c ON p.client_id = c.id " +
+           "WHERE c.agent_id = :agentId " +
+           "AND p.renewal_status = 'RENEWED' " +
+           "AND EXTRACT(MONTH FROM p.created_at) = EXTRACT(MONTH FROM CURRENT_DATE) " +
+           "AND EXTRACT(YEAR FROM p.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)", nativeQuery = true)
+    long countRenewalsThisMonth(@Param("agentId") Long agentId);
+
+    @Query(value = "SELECT COALESCE(SUM(p.premium), 0) FROM policies p " +
+           "JOIN clients c ON p.client_id = c.id " +
+           "WHERE c.agent_id = :agentId " +
+           "AND p.renewal_status = 'RENEWED' " +
+           "AND p.created_at BETWEEN :startDate AND :endDate", nativeQuery = true)
+    java.math.BigDecimal sumRenewedPremiumBetween(
+        @Param("agentId") Long agentId, 
+        @Param("startDate") java.time.LocalDateTime startDate, 
+        @Param("endDate") java.time.LocalDateTime endDate
+    );
+
+    @Query(value = "SELECT COUNT(p) FROM policies p " +
+           "JOIN clients c ON p.client_id = c.id " +
+           "WHERE c.agent_id = :agentId " +
+           "AND p.status = 'EXPIRED' " +
+           "AND p.renewal_status = 'PENDING' " +
+           "AND p.expiry_date BETWEEN :startDate AND :endDate", nativeQuery = true)
+    long countLostPoliciesBetween(
+        @Param("agentId") Long agentId,
+        @Param("startDate") java.time.LocalDate startDate,
+        @Param("endDate") java.time.LocalDate endDate
+    );
 }

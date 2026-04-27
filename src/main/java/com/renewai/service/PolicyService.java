@@ -1,5 +1,6 @@
 package com.renewai.service;
 
+import com.renewai.dto.ConfirmRenewalRequest;
 import com.renewai.dto.PolicyRequest;
 import com.renewai.dto.PolicyWithClientRequest;
 import com.renewai.dto.PolicyWithClientResponse;
@@ -156,6 +157,88 @@ public class PolicyService {
      * @return updated policy with client information
      */
     @Transactional
+    public PolicyWithClientResponse confirmAndRenew(Long oldPolicyId, ConfirmRenewalRequest request) {
+        // 1. Get the old policy
+        Policy oldPolicy = policyRepository.findById(oldPolicyId)
+                .orElseThrow(() -> new RuntimeException("Policy not found"));
+
+        Client client = oldPolicy.getClient();
+        logger.info("Confirming renewal for policy: {} | Client: {}", 
+                    oldPolicy.getPolicyNumber(), client.getFullName());
+
+        // 2. Generate new policy number
+        String newPolicyNumber = generateRenewedPolicyNumber(oldPolicy.getPolicyNumber());
+
+        // 3. Create new policy copying old details
+        Policy newPolicy = new Policy();
+        newPolicy.setPolicyNumber(newPolicyNumber);
+        newPolicy.setPolicyType(oldPolicy.getPolicyType());
+        newPolicy.setVehicleType(oldPolicy.getVehicleType());
+        newPolicy.setRegistrationNumber(oldPolicy.getRegistrationNumber());
+        newPolicy.setInsurerName(oldPolicy.getInsurerName());
+        newPolicy.setStartDate(request.getNewStartDate());
+        newPolicy.setExpiryDate(request.getNewExpiryDate());
+        
+        // Use new premium if provided, else keep old
+        newPolicy.setPremium(request.getNewPremium() != null ? 
+                             request.getNewPremium() : oldPolicy.getPremium());
+        
+        newPolicy.setPremiumFrequency(oldPolicy.getPremiumFrequency());
+        newPolicy.setDescription(oldPolicy.getDescription());
+        newPolicy.setStatus("ACTIVE");
+        newPolicy.setRenewalStatus("RENEWED");
+        newPolicy.setManualRenewalNotes(request.getNotes());
+        newPolicy.setClient(client);
+
+        newPolicy = policyRepository.save(newPolicy);
+        logger.info("New policy created: {}", newPolicyNumber);
+
+        // 4. Delete old message logs first (foreign key constraint)
+        messageLogRepository.deleteByPolicyId(oldPolicyId);
+        logger.info("Deleted message logs for old policy ID: {}", oldPolicyId);
+
+        // 5. Delete old policy
+        policyRepository.delete(oldPolicy);
+        logger.info("Deleted old policy: {}", oldPolicy.getPolicyNumber());
+
+        return mapToResponse(newPolicy, client);
+    }
+
+    private String generateRenewedPolicyNumber(String oldPolicyNumber) {
+        if (oldPolicyNumber.contains("-R")) {
+            try {
+                int lastDash = oldPolicyNumber.lastIndexOf("-R");
+                String base = oldPolicyNumber.substring(0, lastDash);
+                int renewalNum = Integer.parseInt(oldPolicyNumber.substring(lastDash + 2));
+                String newNumber = base + "-R" + (renewalNum + 1);
+                
+                if (!policyRepository.existsByPolicyNumber(newNumber)) {
+                    return newNumber;
+                }
+            } catch (Exception e) {
+                // Fallback if parsing fails
+            }
+        }
+        
+        String newNumber = oldPolicyNumber + "-R1";
+        if (!policyRepository.existsByPolicyNumber(newNumber)) {
+            return newNumber;
+        }
+        
+        return oldPolicyNumber + "-R" + System.currentTimeMillis();
+    }
+
+    /**
+     * Mark a policy as manually renewed or contacted.
+     * Used when automated messaging fails after max retries and
+     * the agent contacts the customer directly.
+     *
+     * @param policyId the policy ID
+     * @param notes agent's notes about the manual contact
+     * @param renewed whether the contact resulted in a renewal
+     * @return updated policy with client information
+     */
+    @Transactional
     public PolicyWithClientResponse markAsManuallyRenewed(Long policyId, String notes, boolean renewed) {
         logger.info("Marking policy {} as manually handled. Renewed: {}", policyId, renewed);
         
@@ -296,5 +379,29 @@ public class PolicyService {
     @Transactional
     public Policy savePolicy(Policy policy) {
         return policyRepository.save(policy);
+    }
+
+    public Object debugMyPolicies(String username) {
+        Agent agent = agentRepository.findByUsername(username)
+                .or(() -> agentRepository.findByEmail(username))
+                .orElseThrow(() -> new RuntimeException("Agent not found"));
+        
+        List<Policy> policies = policyRepository.findByAgentId(agent.getId());
+        
+        // Calculate some stats for the response
+        long activeCount = policies.stream().filter(p -> "ACTIVE".equals(p.getStatus())).count();
+        long expiringSoon = policies.stream().filter(p -> {
+            LocalDate soon = LocalDate.now().plusDays(30);
+            return "ACTIVE".equals(p.getStatus()) && !p.getExpiryDate().isBefore(LocalDate.now()) && !p.getExpiryDate().isAfter(soon);
+        }).count();
+        
+        return java.util.Map.of(
+            "agentId", agent.getId(),
+            "username", agent.getUsername(),
+            "policyCount", policies.size(),
+            "activeCount", activeCount,
+            "expiringSoonCount", expiringSoon,
+            "policies", policies
+        );
     }
 }

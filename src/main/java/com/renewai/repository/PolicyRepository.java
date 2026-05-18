@@ -68,6 +68,9 @@ public interface PolicyRepository extends JpaRepository<Policy, Long> {
     @Query("SELECT p FROM Policy p WHERE p.expiryDate < :date AND p.status = 'ACTIVE'")
     List<Policy> findActivePoliciesExpiringBefore(@Param("date") LocalDate date);
 
+    @Query("SELECT p FROM Policy p JOIN FETCH p.client c WHERE c.agent.id = :agentId")
+    List<Policy> findByAgentIdWithClient(@Param("agentId") Long agentId);
+
     @Query("SELECT p FROM Policy p WHERE p.client.agent.id = :agentId")
     List<Policy> findByAgentId(@Param("agentId") Long agentId);
 

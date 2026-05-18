@@ -2,6 +2,7 @@ package com.renewai;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
@@ -17,11 +18,13 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * - Message deduplication using MessageLog
  * 
  * @EnableScheduling enables the scheduled tasks (renewal reminder job)
+ * @EnableCaching enables Redis caching for dashboard performance
  */
 @SpringBootApplication
 @EnableScheduling
+@EnableCaching
 public class RenewAiApplication {
-    
+
     public static void main(String[] args) {
         SpringApplication.run(RenewAiApplication.class, args);
         System.out.println("===========================================");

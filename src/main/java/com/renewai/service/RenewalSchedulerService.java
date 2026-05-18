@@ -6,6 +6,7 @@ import com.renewai.repository.MessageLogRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -30,6 +31,7 @@ public class RenewalSchedulerService {
      * Scheduled job to mark policies as EXPIRED
      */
     @Scheduled(cron = "0 0 8 * * ?")
+    @CacheEvict(value = {"dashboardSummary", "renewalTrends", "revenueTrends", "policyDistribution", "aiInsights", "conversionFunnel"}, allEntries = true)
     public void updateExpiredPolicies() {
         logger.info("=== Starting daily policy expiration job ===");
         try {
@@ -51,6 +53,7 @@ public class RenewalSchedulerService {
      * Scheduled job to check for expiring policies and send reminders
      */
     @Scheduled(cron = "${renewal.scheduler.cron}")
+    @CacheEvict(value = {"dashboardSummary", "renewalTrends", "revenueTrends", "policyDistribution", "aiInsights", "conversionFunnel"}, allEntries = true)
     public void checkExpiringPoliciesAndSendReminders() {
         logger.info("=== Starting daily renewal reminder job ===");
         

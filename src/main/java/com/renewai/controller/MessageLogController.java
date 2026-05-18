@@ -40,7 +40,7 @@ public class MessageLogController {
      */
     @GetMapping("/logs")
     public ResponseEntity<List<MessageLogDto>> getAllMessageLogs() {
-        List<MessageLog> logs = messageLogRepository.findAll(Sort.by(Sort.Direction.DESC, "sentAt"));
+        List<MessageLog> logs = messageLogRepository.findAllWithPolicyAndClient();
 
         List<MessageLogDto> dtos = logs.stream()
                 .map(this::mapToDto)

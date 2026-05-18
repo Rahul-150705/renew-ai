@@ -18,10 +18,16 @@ import java.util.Optional;
 public interface MessageLogRepository extends JpaRepository<MessageLog, Long> {
     
     /**
-     * Find all messages sent for a specific policy
-     * @param policy the policy
-     * @return list of message logs
+     * Eagerly fetch message logs with their associated policies and clients
+     * to prevent N+1 select query issues.
      */
+    @Query("SELECT ml FROM MessageLog ml " +
+           "LEFT JOIN FETCH ml.policy p " +
+           "LEFT JOIN FETCH p.client c " +
+           "LEFT JOIN FETCH ml.customer cust " +
+           "ORDER BY ml.sentAt DESC")
+    List<MessageLog> findAllWithPolicyAndClient();
+
     List<MessageLog> findByPolicy(Policy policy);
     
     /**

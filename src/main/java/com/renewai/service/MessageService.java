@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -86,6 +87,7 @@ public class MessageService {
     }
     
     @Transactional
+    @CacheEvict(value = {"dashboardSummary", "aiInsights", "conversionFunnel"}, allEntries = true)
     public boolean sendRenewalReminder(Policy policy, String reminderType, int daysUntilExpiry) {
         String whatsappNumber = policy.getClient().getWhatsappNumber();
         String phoneNumber = policy.getClient().getPhoneNumber();
@@ -106,6 +108,7 @@ public class MessageService {
     }
     
     @Transactional
+    @CacheEvict(value = {"dashboardSummary", "aiInsights", "conversionFunnel"}, allEntries = true)
     public boolean sendGenericReminder(Policy policy, String reminderType, int daysUntilExpiry, String channel) {
         if (messageLogRepository.existsByPolicyIdAndReminderTypeAndChannel(policy.getId(), reminderType, channel)) {
             logger.info("Reminder already sent for policy {} - {} - {}", policy.getPolicyNumber(), reminderType, channel);
@@ -161,6 +164,7 @@ public class MessageService {
      * @return the updated message log
      */
     @Transactional
+    @CacheEvict(value = {"dashboardSummary", "aiInsights", "conversionFunnel"}, allEntries = true)
     public MessageLog retryMessage(Long messageLogId) {
         MessageLog messageLog = messageLogRepository.findById(messageLogId)
                 .orElseThrow(() -> new RuntimeException("Message log not found with id: " + messageLogId));

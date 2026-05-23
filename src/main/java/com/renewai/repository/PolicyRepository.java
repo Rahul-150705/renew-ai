@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import com.renewai.dto.ChartDataDto;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -85,7 +86,7 @@ public interface PolicyRepository extends JpaRepository<Policy, Long> {
     long countExpiringSoonByAgentId(@Param("agentId") Long agentId, @Param("startDate") java.time.LocalDate startDate, @Param("endDate") java.time.LocalDate endDate);
 
     @Query("SELECT new com.renewai.dto.ChartDataDto(p.vehicleType, COUNT(p)) FROM Policy p WHERE p.client.agent.id = :agentId GROUP BY p.vehicleType")
-    List<com.renewai.dto.ChartDataDto> findPolicyDistributionByAgentId(@Param("agentId") Long agentId);
+    List<ChartDataDto> findPolicyDistributionByAgentId(@Param("agentId") Long agentId);
 
     @Query("SELECT COUNT(p) FROM Policy p WHERE p.client.agent.id = :agentId AND (p.status = 'RENEWED' OR p.renewalStatus = 'AUTO_RENEWED' OR p.renewalStatus = 'MANUAL_RENEWED')")
     long countRenewedByAgentId(@Param("agentId") Long agentId);

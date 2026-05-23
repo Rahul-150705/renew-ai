@@ -39,8 +39,9 @@ public class DashboardService {
         return agent;
     }
 
-    @Cacheable(value = "dashboardSummary", key = "#p0 + '-' + #p1")
+    @Cacheable(value = "dashboardSummary", key = "#username + '-' + #period")
     public DashboardSummaryDto getSummary(String username, int period) {
+        System.out.println("DEBUG: DashboardService.getSummary called for user: " + username);
         Agent agent = getAgent(username);
         Long agentId = agent.getId();
 

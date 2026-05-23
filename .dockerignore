@@ -1,0 +1,14 @@
+target/
+bin/
+.git/
+.gitignore
+.vscode/
+*.log
+.env
+.env.example
+ARCHITECTURE.md.pdf
+bug fix.txt
+renew ai.txt
+hs_err_pid*.log
+boot_*.log
+server.log

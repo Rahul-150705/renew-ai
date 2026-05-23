@@ -22,7 +22,6 @@ import java.util.stream.Collectors;
  */
 @RestController
 @RequestMapping("/api/messages")
-@CrossOrigin(origins = "*", maxAge = 3600)
 public class MessageLogController {
 
     @Autowired

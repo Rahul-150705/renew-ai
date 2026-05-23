@@ -15,8 +15,6 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-import java.util.Arrays;
-
 /**
  * Security Configuration for the application
  * Configures JWT-based stateless authentication
@@ -34,10 +32,13 @@ public class SecurityConfig {
      * - Protected endpoints: Everything else
      * - Stateless session management (no session cookies)
      */
+    @org.springframework.beans.factory.annotation.Value("${allowed.origins:https://client-connect-hub-zeta.vercel.app}")
+    private String allowedOrigins;
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-            // Enable CORS with our custom configuration
+            // Enable CORS using the bean below
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             
             // Disable CSRF as we are using JWT (stateless)
@@ -49,11 +50,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/error").permitAll()
                 
-                // Protected endpoints
-                .requestMatchers("/api/dashboard/**").authenticated()
-                .requestMatchers("/api/messages/**").authenticated()
-                .requestMatchers("/api/policies/**").authenticated()
-                .requestMatchers("/api/seed/**").authenticated()
+                // All other endpoints require authentication (removed role check)
+                .requestMatchers("/api/**").authenticated()
                 
                 // Allow preflight OPTIONS requests for all endpoints
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
@@ -73,29 +71,18 @@ public class SecurityConfig {
         return http.build();
     }
 
-    /**
-     * CORS configuration
-     * - Allows any localhost origin
-     * - Supports credentials (cookies/auth headers)
-     */
-    @org.springframework.beans.factory.annotation.Value("${allowed.origins:${ALLOWED_ORIGINS:https://client-connect-hub-zeta.vercel.app}}")
-    private String allowedOrigins;
-
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
 
         if (allowedOrigins != null && !allowedOrigins.isBlank()) {
-            String[] origins = allowedOrigins.split(",");
-            for (String origin : origins) {
-                configuration.addAllowedOriginPattern(origin.trim());
+            for (String origin : allowedOrigins.split(",")) {
+                configuration.addAllowedOrigin(origin.trim());
             }
-        } else {
-            configuration.addAllowedOriginPattern("http://localhost:*");
         }
 
-        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-        configuration.setAllowedHeaders(Arrays.asList("*")); // Allow all headers for now to debug
+        configuration.setAllowedMethods(java.util.Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
+        configuration.setAllowedHeaders(java.util.Arrays.asList("*"));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);
 

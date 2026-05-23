@@ -78,7 +78,7 @@ public class SecurityConfig {
      * - Allows any localhost origin
      * - Supports credentials (cookies/auth headers)
      */
-    @org.springframework.beans.factory.annotation.Value("${allowed.origins}")
+    @org.springframework.beans.factory.annotation.Value("${allowed.origins:${ALLOWED_ORIGINS:https://client-connect-hub-zeta.vercel.app}}")
     private String allowedOrigins;
 
     @Bean
@@ -86,13 +86,16 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
 
         if (allowedOrigins != null && !allowedOrigins.isBlank()) {
-            configuration.setAllowedOrigins(Arrays.asList(allowedOrigins.split(",")));
+            String[] origins = allowedOrigins.split(",");
+            for (String origin : origins) {
+                configuration.addAllowedOriginPattern(origin.trim());
+            }
         } else {
             configuration.addAllowedOriginPattern("http://localhost:*");
         }
 
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept", "X-Requested-With"));
+        configuration.setAllowedHeaders(Arrays.asList("*")); // Allow all headers for now to debug
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);
 

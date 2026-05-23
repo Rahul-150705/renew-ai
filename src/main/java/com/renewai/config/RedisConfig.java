@@ -36,9 +36,20 @@ public class RedisConfig implements CachingConfigurer {
 
     private static final Logger log = LoggerFactory.getLogger(RedisConfig.class);
 
+    @org.springframework.beans.factory.annotation.Value("${spring.data.redis.host}")
+    private String redisHost;
+
+    @org.springframework.beans.factory.annotation.Value("${spring.data.redis.ssl.enabled}")
+    private boolean redisSsl;
+
     @Bean
     public CacheManager cacheManager(RedisConnectionFactory connectionFactory) {
-
+        System.out.println("===========================================");
+        System.out.println("   [Redis] Initialization Check");
+        System.out.println("   Host: " + redisHost);
+        System.out.println("   SSL Enabled: " + redisSsl);
+        System.out.println("===========================================");
+        
         // Build a custom ObjectMapper that handles LocalDate/LocalDateTime correctly
         ObjectMapper redisObjectMapper = new ObjectMapper();
         redisObjectMapper.registerModule(new JavaTimeModule());

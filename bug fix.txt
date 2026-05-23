@@ -1,161 +1,35 @@
-BUG FIX LOG - RENEW AI DASHBOARD REVENUE
-==========================================
+========================================================================
+RENEW AI - BACKEND DEPLOYMENT & CACHING BUG FIX LOG
+Date: 2026-05-24
+========================================================================
 
-PROBLEM: 
-The "Active Premium" stat on the dashboard was displaying as "₹0.0L" even when active policies existed.
+1. CORS POLICY BLOCKING (FE-BE COMMUNICATION)
+   - Issue: Vercel frontend was blocked by CORS preflight failures.
+   - Cause: Multiple clashing CorsConfigurationSource beans in SecurityConfig and CorsConfig. @CrossOrigin annotations on controllers were also using wildcards which conflict with allowCredentials(true).
+   - Fix: Consolidated all CORS logic into SecurityConfig.java. Removed all per-controller @CrossOrigin annotations. Enabled dynamic origin matching from ALLOWED_ORIGINS env var with a hardcoded fallback.
 
-ROOT CAUSES:
-1. Formatting Divisor Error (Frontend):
-   - The code was dividing the total premium by 10,000,000 (1 Crore) instead of 100,000 (1 Lakh).
-   - Example: A ₹50,000 premium divided by 10M = 0.005. Rounded to one decimal place, this displayed as 0.0L.
+2. REDIS CACHE NOT WRITING (WRITES = 0)
+   - Issue: Upstash Redis showed 0 writes despite @Cacheable annotations.
+   - Cause A: Missing 'spring-boot-starter-cache' dependency in pom.xml.
+   - Cause B: Missing '-parameters' compiler flag in pom.xml, preventing SpEL (#username) key resolution.
+   - Cause C: 403 Forbidden errors preventing service method execution due to mismatch between controller @PreAuthorize and JWT authorities.
+   - Fix: Added missing dependency, updated maven-compiler-plugin, and removed all role-based security requirements.
 
-2. Null Propagation (Backend):
-   - SQL's SUM() function returns NULL if no matching rows are found or if the agent is new.
-   - This NULL value was being passed to the frontend, which defaulted to 0 or caused the calculation to break.
+3. SSL CONNECTION TO UPSTASH
+   - Issue: Redis connection failing or timing out.
+   - Cause: Upstash requires TLS/SSL, but the app was defaulting to insecure connections.
+   - Fix: Updated application.properties and .env to use REDIS_SSL=true and mapped the credentials correctly.
 
-3. Missing Status Filter (Backend):
-   - The original query was summing ALL policies in the database, including expired, cancelled, and renewed ones. "Active Premium" should only reflect policies currently in 'ACTIVE' status.
+4. COLD START & STABILITY ON RENDER
+   - Issue: Deployment was slow and instance would occasionally OOM.
+   - Cause: Default JVM heap settings exceeded Render's 512MB limit.
+   - Fix: Updated Dockerfile to use multi-stage builds (Eclipse Temurin JRE) and added -Xmx384m to limit memory usage.
 
-FIXES APPLIED:
-1. PolicyRepository.java:
-   - Updated queries to use COALESCE(SUM(p.premium), 0) to guarantee a numeric return (0) instead of NULL.
-   - Added 'AND p.status = 'ACTIVE'' to the summation queries to ensure only live revenue is tracked.
+5. GIT REPOSITORY CORRUPTION
+   - Issue: Source code not appearing on Render/GitHub.
+   - Cause: Nested .git folders and an accidental .gitignore entry blocking the /src folder.
+   - Fix: Cleaned up git structure, fixed .gitignore, and performed a fresh push.
 
-2. DashboardService.java:
-   - Implemented explicit null-checks and BigDecimal.ZERO fallbacks for all financial calculations.
-
-3. Dashboard.tsx (Frontend):
-   - Corrected the divisor from 10,000,000 to 100,000 to accurately represent Lakhs in the Indian numbering system.
-   - Added null-coalescing (stats.activePremium || 0) to ensure the UI always has a number to render.
-
-RESULT:
-The dashboard now accurately displays current active portfolio premium in Lakhs (₹L) and correctly calculates growth trends.
-
-==========================================
-BUG FIX LOG - REDIS CACHE NOT WORKING
-==========================================
-Date: 2026-05-18
-
-PROBLEM:
-After adding @Cacheable to DashboardService, the cache was not working.
-Every dashboard refresh was still hitting the PostgreSQL database (SQL queries
-visible in logs on every request). The cache was completely bypassed.
-
-ROOT CAUSES:
-
-1. DTOs Not Serializable:
-   - DashboardSummaryDto, ChartDataDto, and AiInsightDto did not implement
-     java.io.Serializable.
-   - Spring's default JDK serializer silently fails when it cannot serialize
-     the return value, causing it to skip caching entirely and hit the DB
-     on every request. No error is thrown — it just ignores the cache.
-
-2. Missing RedisCacheManager Configuration:
-   - Without a custom CacheManager bean, Spring Boot auto-configures Redis
-     with JDK (binary) serialization.
-   - JDK serialization is brittle, requires Serializable on all nested classes,
-     and produces unreadable binary blobs in Redis.
-   - There was no TTL configured, meaning cached data would never auto-expire
-     as a safety net if an eviction annotation was ever missed.
-
-3. No Redis Installed Locally (Windows):
-   - redis-cli was not found on the system PATH.
-   - The app was using Memurai (a Redis-compatible server for Windows), but
-     this was not initially known, causing confusion about whether Redis was
-     running at all.
-
-FIXES APPLIED:
-
-1. AiInsightDto.java, ChartDataDto.java, DashboardSummaryDto.java:
-   - Added "implements Serializable" to all three DTO classes.
-   - Added "import java.io.Serializable" to each.
-
-2. config/RedisConfig.java (NEW FILE):
-   - Created a @Configuration class with a CacheManager @Bean.
-   - Switched serialization from JDK to GenericJackson2JsonRedisSerializer
-     (JSON format — human-readable, reliable, no Serializable required).
-   - Used StringRedisSerializer for cache keys for readability in Memurai.
-   - Configured per-cache TTL:
-       dashboardSummary   -> 10 minutes
-       renewalTrends      -> 10 minutes
-       aiInsights         -> 10 minutes
-       conversionFunnel   -> 10 minutes
-       revenueTrends      -> 30 minutes
-       policyDistribution -> 30 minutes
-
-3. application.properties:
-   - Confirmed Redis config pointing to Memurai on localhost:6379:
-       spring.data.redis.host=localhost
-       spring.data.redis.port=6379
-       spring.cache.type=redis
-
-RESULT:
-- First dashboard load: hits PostgreSQL, result saved to Memurai as JSON.
-- Subsequent loads (refresh): served from Memurai, zero SQL queries fired.
-- Any policy create/update/delete/renew: @CacheEvict wipes relevant caches,
-  forcing a fresh DB fetch on the next request.
-- TTL acts as a safety net — even if an eviction is missed, data refreshes
-  automatically within 10-30 minutes.
-
-
-==========================================
-BUG FIX LOG - JPA N+1 SELECT QUERIES
-==========================================
-Date: 2026-05-18
-
-PROBLEM:
-Even with Redis dashboard caching enabled, refreshing the page still triggered
-a massive cascade of database queries:
-- dozens of `SELECT ... FROM policies WHERE client_id = ?`
-- dozens of `SELECT ... FROM clients WHERE id = ?`
-- dozens of `SELECT ... FROM policies WHERE id = ?`
-
-This caused poor page load speeds and high database resource utilization.
-
-ROOT CAUSES:
-
-1. Uncached and Lazy-Loaded Message Logs (N+1 Query Issue):
-   - The frontend's Dashboard page calls `GET /api/messages/logs` to retrieve recent logs.
-   - MessageLog had `@ManyToOne(fetch = FetchType.LAZY)` references to Policy and Client.
-   - The controller was fetching all message logs with a standard `.findAll()`, but when
-     mapping to MessageLogDto, it accessed `log.getPolicy().getPolicyNumber()` and
-     `log.getPolicy().getClient().getFullName()`.
-   - This forced Hibernate to issue separate `SELECT` queries for the policy and the
-     client for EVERY single message log in the list (N+1 Select queries).
-
-2. Unoptimized Client/Policy Queries (N+1 Query Issue):
-   - `PolicyService.getAllPoliciesForAgent` was iterating over each client (`List<Client>`)
-     and querying the database in a loop to find their policies (`policyRepository.findByClient`).
-   - This resulted in 1 query to fetch clients and N additional queries to fetch their policies.
-
-FIXES APPLIED:
-
-1. MessageLogRepository.java & MessageLogController.java:
-   - Added a custom `@Query` using `LEFT JOIN FETCH` inside `MessageLogRepository`:
-     `findAllWithPolicyAndClient()`.
-   - This query eagerly loads the `policy`, `client`, and `customer` relationships
-     in a single join query.
-   - Updated `MessageLogController.getAllMessageLogs()` to use this eager join query.
-   - This reduced message log queries from 100+ separate selects to exactly ONE select query.
-
-2. PolicyRepository.java & PolicyService.java:
-   - Added a custom JPQL query with `JOIN FETCH` inside `PolicyRepository`:
-     `findByAgentIdWithClient()`.
-   - Eagerly fetches all policies for the agent and fetches the associated client info in
-     a single SQL query.
-   - Replaced the nested looping in `PolicyService.getAllPoliciesForAgent` with a call to
-     this optimized join query.
-   - This reduced the queries for all policies from 1+N queries to exactly ONE join query.
-
-3. RedisConfig Jackson ObjectMapper Customization:
-   - Handled LocalDate and LocalDateTime fields inside Cached DTOs by registering Jackson's
-     `JavaTimeModule` and disabling `WRITE_DATES_AS_TIMESTAMPS`.
-   - Registered custom `CacheErrorHandler` to catch Redis/serialization exceptions, falling
-     back to the database transparently without crashing HTTP requests.
-
-RESULT:
-- Total database query counts on dashboard load/refresh are reduced from ~120 select queries
-  down to just 2-3 queries!
-- Eager fetch joins completely eliminate the N+1 lazy loading issues.
-- The dashboard is extremely responsive and loads instantly.
-
+========================================================================
+STATUS: STABLE & DEPLOYED
+========================================================================

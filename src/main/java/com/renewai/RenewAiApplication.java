@@ -25,6 +25,20 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableCaching
 public class RenewAiApplication {
 
+    @org.springframework.context.annotation.Bean
+    public org.springframework.boot.CommandLineRunner redisTest(org.springframework.data.redis.core.StringRedisTemplate template) {
+        return args -> {
+            try {
+                System.out.println("[Redis] Attempting to write test key...");
+                template.opsForValue().set("RENEW_AI_TEST_KEY", "Connection Successful at " + java.time.LocalDateTime.now());
+                String value = template.opsForValue().get("RENEW_AI_TEST_KEY");
+                System.out.println("[Redis] Test write/read successful! Value: " + value);
+            } catch (Exception e) {
+                System.err.println("[Redis] ❌ Connection failed: " + e.getMessage());
+            }
+        };
+    }
+
     public static void main(String[] args) {
         SpringApplication.run(RenewAiApplication.class, args);
         System.out.println("===========================================");

@@ -14,22 +14,62 @@ import jakarta.annotation.PostConstruct;
 import java.util.*;
 
 /**
- * Natural Language Query Service — Intent-Routed Architecture
+ * Natural Language Query Service — 7-Level Architecture
  *
- * Flow:
- * 1. Java classifies the question into an Intent (no LLM call needed)
- * 2. Intent-specific system prompt + rich examples sent to Groq → SQL
- * 3. SQL executed against PostgreSQL (agent-scoped, safety-checked)
- * 4. Raw DB result sent to Groq → friendly structured answer
- *
- * To add a new query type:
- * - Add keywords to classifyIntent()
- * - Add a new case in getIntentExamples()
+ * Level 1 — Full conversation history sent to Groq (not just system+user)
+ * Level 2 — Comprehensive system prompt with business rules
+ * Level 3 — Session memory (lastTopic, lastCategories, lastResult, lastSql)
+ * Level 4 — Intent + reference detection ("this", "those", "them")
+ * Level 5 — Semantic category synonym mapping (car→Auto, bike→Bike, etc.)
+ * Level 6 — Schema with business meaning (not just column names)
+ * Level 7 — Conversation summarization when history grows large
  */
 @Service
 public class NLQueryService {
 
     private static final Logger logger = LoggerFactory.getLogger(NLQueryService.class);
+
+    // ── Return type ───────────────────────────────────────────────────────────
+    public record AskResult(String answer, String sql, SessionMemory sessionMemory) {
+    }
+
+    /**
+     * Level 3 — Session Memory
+     * Passed back to frontend after each response, sent back on next request.
+     */
+    public record SessionMemory(
+            String lastTopic,
+            List<String> lastCategories,
+            String lastResultSummary,
+            String lastSql) {
+    }
+
+    // ── Level 5 — Synonym Map ─────────────────────────────────────────────────
+    private static final Map<String, String> CATEGORY_SYNONYMS = new LinkedHashMap<>();
+    static {
+        CATEGORY_SYNONYMS.put("car", "Auto");
+        CATEGORY_SYNONYMS.put("automobile", "Auto");
+        CATEGORY_SYNONYMS.put("four wheeler", "Auto");
+        CATEGORY_SYNONYMS.put("four-wheeler", "Auto");
+        CATEGORY_SYNONYMS.put("motorbike", "Bike");
+        CATEGORY_SYNONYMS.put("motorcycle", "Bike");
+        CATEGORY_SYNONYMS.put("two wheeler", "Bike");
+        CATEGORY_SYNONYMS.put("two-wheeler", "Bike");
+        CATEGORY_SYNONYMS.put("scooter", "Bike");
+        CATEGORY_SYNONYMS.put("property", "Home");
+        CATEGORY_SYNONYMS.put("house insurance", "Home");
+        CATEGORY_SYNONYMS.put("home insurance", "Home");
+        CATEGORY_SYNONYMS.put("medical insurance", "Health");
+        CATEGORY_SYNONYMS.put("medical", "Health");
+        CATEGORY_SYNONYMS.put("mediclaim", "Health");
+        CATEGORY_SYNONYMS.put("term plan", "Life");
+        CATEGORY_SYNONYMS.put("term insurance", "Life");
+        CATEGORY_SYNONYMS.put("travel insurance", "Travel");
+        CATEGORY_SYNONYMS.put("trip insurance", "Travel");
+        CATEGORY_SYNONYMS.put("lorry", "Truck");
+        CATEGORY_SYNONYMS.put("heavy vehicle", "Truck");
+        CATEGORY_SYNONYMS.put("commercial vehicle", "Truck");
+    }
 
     @Value("${groq.api.url:https://api.groq.com/openai/v1/chat/completions}")
     private String groqUrl;
@@ -47,28 +87,21 @@ public class NLQueryService {
 
     private String cachedSchema = "";
 
-    // ── Intent categories ─────────────────────────────────────────────────────
     public enum Intent {
-        PORTFOLIO, // policy mix, breakdown, distribution by type
-        RENEWALS, // expiring, renewal rate, pending, upcoming
-        REVENUE, // premium, income, total revenue, earnings
-        CLIENTS, // client info, top clients, lost clients
-        MESSAGES, // sms, whatsapp, failed messages, reminders
-        PERFORMANCE, // conversion rate, success rate, KPIs
-        GENERAL // fallback
+        PORTFOLIO, RENEWALS, REVENUE, CLIENTS, MESSAGES, PERFORMANCE, GENERAL
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Startup: load real schema from DB
+    // Startup: build rich schema from DB (Level 6)
     // ─────────────────────────────────────────────────────────────────────────
 
     @PostConstruct
     public void initSchema() {
         try {
             cachedSchema = buildSchemaFromDb();
-            logger.info("[NLQuery] Schema loaded successfully from database.");
+            logger.info("[NLQuery] Schema loaded from database.");
         } catch (Exception e) {
-            logger.warn("[NLQuery] DB schema load failed, using fallback. Error: {}", e.getMessage());
+            logger.warn("[NLQuery] DB schema load failed, using fallback: {}", e.getMessage());
             cachedSchema = getFallbackSchema();
         }
     }
@@ -117,173 +150,258 @@ public class NLQueryService {
             if ("NO".equals(row.get("is_nullable")))
                 desc.append(", NOT NULL");
             desc.append(")");
-
             tableColumns.computeIfAbsent(table, k -> new ArrayList<>()).add(desc.toString());
         }
 
-        StringBuilder schema = new StringBuilder("Database Schema (PostgreSQL):\n\n");
-        for (Map.Entry<String, List<String>> entry : tableColumns.entrySet()) {
-            schema.append("TABLE: ").append(entry.getKey()).append("\n");
-            entry.getValue().forEach(c -> schema.append("  - ").append(c).append("\n"));
-            schema.append("\n");
-        }
+        // Level 6 — schema with business meaning
+        StringBuilder schema = new StringBuilder("=== DATABASE SCHEMA ===\n\n");
 
-        schema.append("Business rules:\n")
-                .append("- status: ACTIVE | EXPIRED | RENEWED\n")
-                .append("- renewal_status: PENDING | AUTO_RENEWED | MANUAL_RENEWED | RENEWED\n")
-                .append("- channel: SMS | WHATSAPP\n")
-                .append("- reminder_type: SEVEN_DAYS | THREE_DAYS | EXPIRY_DAY\n")
-                .append("- message status: SENT | FAILED | PENDING\n")
-                .append("- premium is stored in Indian Rupees (INR)\n")
-                .append("- EVERY query MUST join through clients: JOIN clients c ON p.client_id = c.id WHERE c.agent_id = <id>\n");
+        schema.append("TABLE: agents — One row per insurance agent (the logged-in user)\n");
+        tableColumns.getOrDefault("agents", List.of()).forEach(c -> schema.append("  ").append(c).append("\n"));
+        schema.append("\n");
+
+        schema.append("TABLE: clients — Insurance policy holders managed by an agent\n");
+        tableColumns.getOrDefault("clients", List.of()).forEach(c -> schema.append("  ").append(c).append("\n"));
+        schema.append("\n");
+
+        schema.append("TABLE: policies — Insurance policies. Each belongs to one client.\n");
+        schema.append("  vehicle_type = insurance category (Auto, Home, Bike, SUV, Truck, Health, Life, Travel)\n");
+        schema.append("  status = ACTIVE (valid) | EXPIRED (lapsed) | RENEWED (renewed for new term)\n");
+        schema.append("  renewal_status = PENDING | AUTO_RENEWED | MANUAL_RENEWED | RENEWED\n");
+        schema.append("  premium = annual premium in Indian Rupees (INR)\n");
+        schema.append("  expiry_date = when policy coverage ends\n");
+        tableColumns.getOrDefault("policies", List.of()).forEach(c -> schema.append("  ").append(c).append("\n"));
+        schema.append("\n");
+
+        schema.append("TABLE: message_logs — Every SMS/WhatsApp renewal reminder sent\n");
+        schema.append("  reminder_type = SEVEN_DAYS | THREE_DAYS | EXPIRY_DAY\n");
+        schema.append("  channel = SMS | WHATSAPP\n");
+        schema.append("  status = SENT (delivered) | FAILED (not delivered) | PENDING\n");
+        schema.append("  retry_count = number of retries attempted (max 3)\n");
+        tableColumns.getOrDefault("message_logs", List.of()).forEach(c -> schema.append("  ").append(c).append("\n"));
+        schema.append("\n");
+
+        // Level 5 synonyms baked into schema context
+        schema.append("=== CATEGORY SYNONYMS (user term → vehicle_type in DB) ===\n");
+        schema.append("  car / automobile / four wheeler → 'Auto'\n");
+        schema.append("  bike / motorbike / two wheeler / scooter → 'Bike'\n");
+        schema.append("  home / house / property → 'Home'\n");
+        schema.append("  health / medical / mediclaim → 'Health'\n");
+        schema.append("  life / term / term plan → 'Life'\n");
+        schema.append("  travel / trip → 'Travel'\n");
+        schema.append("  truck / lorry / commercial → 'Truck'\n");
+        schema.append("  suv → 'SUV'\n\n");
+
+        schema.append("=== MANDATORY RULES ===\n");
+        schema.append("- EVERY query: JOIN clients c ON p.client_id = c.id WHERE c.agent_id = <id>\n");
+        schema.append("- Category filters: use ILIKE not = (e.g. p.vehicle_type ILIKE 'Auto')\n");
+        schema.append("- Multi-category: p.vehicle_type ILIKE ANY(ARRAY['%Auto%','%Car%'])\n");
+        schema.append("- Always COALESCE nullable columns in SELECT\n");
+        schema.append("- Always alias aggregates: COUNT(*) AS policy_count, SUM(premium) AS total_premium\n");
 
         return schema.toString();
     }
 
     private String getFallbackSchema() {
-        return "TABLE: agents        - id(PK), username, email, full_name, phone_number, active\n" +
-                "TABLE: clients       - id(PK), full_name, email, phone_number, whatsapp_number, address, agent_id(FK->agents)\n"
-                +
-                "TABLE: policies      - id(PK), policy_number, policy_type, vehicle_type, registration_number,\n" +
-                "                       insurer_name, start_date, expiry_date, premium(INR), premium_frequency,\n" +
-                "                       status(ACTIVE|EXPIRED|RENEWED), renewal_status(PENDING|AUTO_RENEWED|MANUAL_RENEWED|RENEWED),\n"
-                +
-                "                       manual_renewal_notes, client_id(FK->clients)\n" +
-                "TABLE: message_logs  - id(PK), policy_id(FK->policies), customer_id(FK->clients),\n" +
-                "                       reminder_type(SEVEN_DAYS|THREE_DAYS|EXPIRY_DAY),\n" +
-                "                       channel(SMS|WHATSAPP), status(SENT|FAILED|PENDING),\n" +
-                "                       retry_count, failure_reason, sent_at\n" +
-                "Rule: always JOIN clients c ON p.client_id = c.id WHERE c.agent_id = <agentId>\n";
+        return "TABLE: agents — id(PK), username, email, full_name\n" +
+                "TABLE: clients — id(PK), full_name, email, phone_number, whatsapp_number, agent_id(FK)\n" +
+                "TABLE: policies — id(PK), vehicle_type[Auto|Home|Bike|SUV|Truck|Health|Life|Travel],\n" +
+                "                  expiry_date, premium(INR), status[ACTIVE|EXPIRED|RENEWED],\n" +
+                "                  renewal_status[PENDING|AUTO_RENEWED|MANUAL_RENEWED|RENEWED], client_id(FK)\n" +
+                "TABLE: message_logs — id(PK), policy_id(FK), channel[SMS|WHATSAPP],\n" +
+                "                      status[SENT|FAILED|PENDING], retry_count, sent_at\n" +
+                "SYNONYMS: car→Auto, bike→Bike, house→Home, medical→Health, term→Life\n" +
+                "RULE: always JOIN clients c ON p.client_id = c.id WHERE c.agent_id = <agentId>\n";
     }
 
-    /// resolve follow up
-    ///
-    /**
-     * Detects follow-up questions and rewrites them with full context.
-     * e.g. "show me those clients" -> "show me the clients with failed whatsapp
-     * messages"
-     * e.g. "now filter by this month" -> "policies expiring in next 30 days, filter
-     * by this month"
-     */
-    private String resolveFollowUp(String question, List<Map<String, String>> history) {
-        if (history == null || history.isEmpty())
-            return question;
-
-        String q = question.toLowerCase().trim();
-
-        // Detect if this is a follow-up (contains references or is very short)
-        boolean isFollowUp = q.length() < 25
-                || anyMatch(q, "those", "them", "their", "these", "that", "the same",
-                        "more details", "show more", "also", "and also", "what about",
-                        "now filter", "filter by", "sort by", "order by",
-                        "break it down", "drill down", "zoom in");
-
-        if (!isFollowUp)
-            return question;
-
-        // Build context from last 2 exchanges
-        StringBuilder context = new StringBuilder();
-        int start = Math.max(0, history.size() - 4);
-        for (Map<String, String> turn : history.subList(start, history.size())) {
-            String role = turn.get("role");
-            String content = turn.get("content");
-            if (content != null && content.length() > 0) {
-                // Truncate long assistant answers to keep prompt lean
-                String snippet = content.length() > 200
-                        ? content.substring(0, 200) + "..."
-                        : content;
-                context.append(role.toUpperCase()).append(": ").append(snippet).append("\n");
-            }
-        }
-
-        // Ask Groq to rewrite the question in full
-        String systemPrompt = "You are a question-rewriter for an insurance business chatbot.\n" +
-                "Given a conversation history and a follow-up question, rewrite the follow-up\n" +
-                "as a fully self-contained question that doesn't rely on previous context.\n\n" +
-                "Rules:\n" +
-                "- Output ONLY the rewritten question, nothing else.\n" +
-                "- Keep it short (one sentence).\n" +
-                "- Preserve the original intent exactly.\n" +
-                "- If the question is already self-contained, return it unchanged.\n";
-
-        String userMessage = "Conversation history:\n" + context +
-                "\nFollow-up question: \"" + question + "\"\n" +
-                "Rewritten question:";
-
-        try {
-            String rewritten = callGroq(systemPrompt, userMessage).strip()
-                    .replaceAll("^\"|\"$", ""); // strip surrounding quotes if any
-            logger.info("[NLQuery] Follow-up expanded: '{}' -> '{}'", question, rewritten);
-            return rewritten.isEmpty() ? question : rewritten;
-        } catch (Exception e) {
-            logger.warn("[NLQuery] Follow-up resolution failed, using original: {}", e.getMessage());
-            return question; // safe fallback
-        }
-    }
     // ─────────────────────────────────────────────────────────────────────────
     // Public entry point
     // ─────────────────────────────────────────────────────────────────────────
 
-    public String ask(String question, String username, List<Map<String, String>> history) {
+    public AskResult ask(String question, String username,
+            List<Map<String, String>> history,
+            SessionMemory sessionMemory) {
+
         if (question == null || question.trim().isEmpty()) {
-            return "Please ask a question about your policies, clients, revenue, or messages.";
+            return new AskResult(
+                    "Please ask a question about your policies, clients, revenue, or messages.",
+                    null, sessionMemory);
         }
 
         Agent agent = agentRepository.findByUsername(username).orElse(null);
-        if (agent == null)
-            return "Error: Agent not found for username: " + username;
+        if (agent == null) {
+            return new AskResult("Error: Agent not found for username: " + username, null, sessionMemory);
+        }
         Long agentId = agent.getId();
 
-        // NEW: Expand follow-up questions using history before classifying
-        String resolvedQuestion = resolveFollowUp(question, history);
-        logger.info("[NLQuery] Original='{}' -> Resolved='{}'", question, resolvedQuestion);
+        // Level 5 — Apply synonym mapping first
+        String mappedQuestion = applySynonymMapping(question);
+        logger.info("[NLQuery] Synonym mapped: '{}' → '{}'", question, mappedQuestion);
 
-        // NEW: Classify with history so follow-ups inherit the right intent
-        Intent intent = classifyIntent(resolvedQuestion, history);
-        logger.info("[NLQuery] Intent={}", intent);
+        // Level 4 — Detect if question references previous result
+        boolean isReferencing = detectsPreviousReference(mappedQuestion);
 
+        // Classify intent on original question BEFORE follow-up expansion
+        // so "give me only Auto" inherits PORTFOLIO from history
+        Intent intent = classifyIntent(mappedQuestion, history);
+        logger.info("[NLQuery] Intent={} | ReferencingPrevious={}", intent, isReferencing);
+
+        // Level 7 — Summarize history if too long
+        List<Map<String, String>> effectiveHistory = maybeSummarizeHistory(history);
+
+        // Generate SQL
         String sql;
         try {
-            sql = generateSql(resolvedQuestion, agentId, intent, history);
-            logger.info("[NLQuery] Generated SQL:\n{}", sql);
+            sql = generateSql(mappedQuestion, agentId, intent, effectiveHistory, sessionMemory, isReferencing);
+            logger.info("[NLQuery] SQL:\n{}", sql);
         } catch (Exception e) {
             logger.error("[NLQuery] SQL generation failed: {}", e.getMessage());
-            return "I had trouble understanding that. Try asking about policies, revenue, clients, or messages.";
+            return new AskResult(
+                    "I had trouble understanding that. Try asking about policies, revenue, clients, or messages.",
+                    null, sessionMemory);
         }
 
+        // Execute
         String rawResult;
         try {
             rawResult = executeQuery(sql, agentId);
-            logger.info("[NLQuery] Raw DB result: {}", rawResult);
+            logger.info("[NLQuery] Result (500 chars): {}",
+                    rawResult.length() > 500 ? rawResult.substring(0, 500) + "..." : rawResult);
         } catch (Exception e) {
-            logger.error("[NLQuery] Query execution failed: {}", e.getMessage());
-            return "I couldn't fetch that data. Please try rephrasing your question.";
+            logger.error("[NLQuery] Execution failed: {}", e.getMessage());
+            return new AskResult("I couldn't fetch that data. Please try rephrasing.", sql, sessionMemory);
         }
 
+        // Level 3 — Update session memory
+        SessionMemory newMemory = extractNewSessionMemory(mappedQuestion, rawResult, sql, intent, sessionMemory);
+
+        // Format answer
         try {
-            // NEW: Pass history to formatter for continuity
-            return formatAnswer(resolvedQuestion, rawResult, intent, history);
+            String answer = formatAnswer(mappedQuestion, rawResult, intent, effectiveHistory, newMemory);
+            return new AskResult(answer, sql, newMemory);
         } catch (Exception e) {
             logger.error("[NLQuery] Formatting failed: {}", e.getMessage());
-            return "Here's the raw data: " + rawResult;
+            return new AskResult("Here's the raw data: " + rawResult, sql, newMemory);
         }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Step 1 - Intent classification (keyword-based, zero LLM cost)
+    // Level 5 — Synonym Mapping
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private String applySynonymMapping(String question) {
+        if (question == null)
+            return "";
+        String result = question;
+        for (Map.Entry<String, String> entry : CATEGORY_SYNONYMS.entrySet()) {
+            result = result.replaceAll("(?i)\\b" + entry.getKey() + "\\b", entry.getValue());
+        }
+        return result;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Level 4 — Previous Reference Detection
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private boolean detectsPreviousReference(String question) {
+        String q = " " + question.toLowerCase() + " ";
+        return anyMatch(q,
+                " this ", " those ", " them ", " these ", " that ",
+                "of this", "of those", "from this", "from those",
+                "among these", "in this list", "give me only",
+                "filter by", "break it down", "drill down",
+                "sort that", "order that", "show me more",
+                "same list", "above list", "those clients",
+                "those policies", "that data");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Level 7 — History Summarization
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private List<Map<String, String>> maybeSummarizeHistory(List<Map<String, String>> history) {
+        if (history == null || history.size() <= 16)
+            return history;
+
+        int splitPoint = history.size() / 2;
+        List<Map<String, String>> oldMessages = history.subList(0, splitPoint);
+        List<Map<String, String>> recentMessages = history.subList(splitPoint, history.size());
+
+        try {
+            StringBuilder convText = new StringBuilder();
+            for (Map<String, String> turn : oldMessages) {
+                convText.append(turn.get("role").toUpperCase()).append(": ")
+                        .append(turn.get("content")).append("\n");
+            }
+
+            String summary = callGroq(
+                    "Summarize this insurance business conversation in 3-4 sentences. " +
+                            "Focus on topics discussed, data retrieved, and what the user is trying to do. " +
+                            "Be specific about categories, time periods, and numbers. Output ONLY the summary.",
+                    convText.toString()).strip();
+
+            logger.info("[NLQuery] Summarized {} messages → {}", oldMessages.size(), summary);
+
+            List<Map<String, String>> compressed = new ArrayList<>();
+            compressed.add(Map.of("role", "system", "content",
+                    "[Earlier conversation summary]: " + summary));
+            compressed.addAll(recentMessages);
+            return compressed;
+
+        } catch (Exception e) {
+            logger.warn("[NLQuery] Summarization failed, trimming to last 8 exchanges: {}", e.getMessage());
+            return history.subList(Math.max(0, history.size() - 16), history.size());
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Level 3 — Session Memory Extraction
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private SessionMemory extractNewSessionMemory(String question, String rawResult,
+            String sql, Intent intent,
+            SessionMemory previous) {
+        String topic = switch (intent) {
+            case PORTFOLIO -> "portfolio";
+            case RENEWALS -> "renewals";
+            case REVENUE -> "revenue";
+            case CLIENTS -> "clients";
+            case MESSAGES -> "messages";
+            case PERFORMANCE -> "performance";
+            default -> previous != null ? previous.lastTopic() : "general";
+        };
+
+        // Detect categories in the SQL
+        List<String> categories = new ArrayList<>();
+        if (sql != null) {
+            String sqlLower = sql.toLowerCase();
+            for (String cat : List.of("Auto", "Home", "Bike", "SUV", "Truck", "Health", "Life", "Travel")) {
+                if (sqlLower.contains(cat.toLowerCase()))
+                    categories.add(cat);
+            }
+        }
+        if (categories.isEmpty() && previous != null && previous.lastCategories() != null) {
+            categories = previous.lastCategories();
+        }
+
+        String resultSummary = (rawResult == null || rawResult.equals("[]"))
+                ? "No data found"
+                : rawResult.length() > 400 ? rawResult.substring(0, 400) + "..." : rawResult;
+
+        return new SessionMemory(topic, categories, resultSummary, sql);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Intent Classification
     // ─────────────────────────────────────────────────────────────────────────
 
     Intent classifyIntent(String question, List<Map<String, String>> history) {
-        // Try to classify the current question first
         Intent current = classifyIntent(question);
-
-        // If we got a clear intent, use it
         if (current != Intent.GENERAL)
             return current;
 
-        // If question is vague/short AND we have history, inherit the last known intent
-        if (question.trim().length() < 30 && history != null && history.size() >= 2) {
-            // Find last user question in history and classify it
+        // Short follow-up — inherit from history
+        if (question.trim().length() < 40 && history != null && history.size() >= 2) {
             for (int i = history.size() - 1; i >= 0; i--) {
                 Map<String, String> turn = history.get(i);
                 if ("user".equals(turn.get("role"))) {
@@ -295,22 +413,20 @@ public class NLQueryService {
                 }
             }
         }
-
         return Intent.GENERAL;
     }
 
-    // Keep the original single-arg version for internal use
     Intent classifyIntent(String question) {
         String q = question.toLowerCase();
 
         if (anyMatch(q, "portfolio", "mix", "breakdown", "distribution", "category",
-                "categories", "types of policy", "policy types", "vehicle type",
-                "how many types", "split", "composition", "proportion", "pie")) {
+                "types of policy", "vehicle type", "split", "composition",
+                "auto", "home", "bike", "suv", "truck", "health", "life", "travel",
+                "insurer", "what types")) {
             return Intent.PORTFOLIO;
         }
         if (anyMatch(q, "revenue", "income", "earning", "money", "premium", "total premium",
-                "how much", "sum", "amount", "financial", "rupee", "payment",
-                "collected", "generated")) {
+                "how much", "sum", "amount", "rupee", "payment", "collected", "commission", "earn")) {
             return Intent.REVENUE;
         }
         if (anyMatch(q, "renew", "renewal", "expir", "due", "upcoming", "pending",
@@ -327,253 +443,227 @@ public class NLQueryService {
             return Intent.MESSAGES;
         }
         if (anyMatch(q, "rate", "conversion", "success rate", "performance",
-                "kpi", "metric", "percentage", "how well", "efficiency", "funnel")) {
+                "kpi", "metric", "percentage", "how well", "efficiency")) {
             return Intent.PERFORMANCE;
         }
-
         return Intent.GENERAL;
     }
 
-    private boolean anyMatch(String question, String... keywords) {
-        for (String kw : keywords) {
-            if (question.contains(kw))
+    private boolean anyMatch(String q, String... keywords) {
+        for (String kw : keywords)
+            if (q.contains(kw))
                 return true;
-        }
         return false;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Step 2 - SQL generation with intent-specific examples
+    // SQL Generation
     // ─────────────────────────────────────────────────────────────────────────
 
-    private String generateSql(String question, Long agentId,
-            Intent intent, List<Map<String, String>> history) {
+    private String generateSql(String question, Long agentId, Intent intent,
+            List<Map<String, String>> history,
+            SessionMemory sessionMemory, boolean isReferencing) {
         String systemPrompt = buildSqlSystemPrompt(intent);
-        String userMessage = buildSqlUserMessage(question, agentId, history);
-        return cleanSql(callGroq(systemPrompt, userMessage));
+        String userMessage = buildSqlUserMessage(question, agentId, sessionMemory, isReferencing);
+        // Level 1 — full history to Groq
+        List<Map<String, Object>> messages = buildGroqMessages(systemPrompt, history, userMessage);
+        return cleanSql(callGroq(messages));
     }
 
-    private String buildSqlSystemPrompt(Intent intent) {
-        String base = "You are a PostgreSQL expert. Output ONLY a single valid SELECT query.\n" +
-                "Rules:\n" +
-                "1. No markdown, no backticks, no explanation -- raw SQL only.\n" +
-                "2. SELECT only 4-8 relevant columns, never SELECT *.\n" +
-                "3. Always filter by agent_id (the value is in the user message).\n" +
-                "4. Use ILIKE for string searches, COALESCE for nullable columns.\n" +
-                "5. Use clear aliases: COUNT(*) AS policy_count, SUM(premium) AS total_premium.\n" +
-                "6. End with a semicolon.\n" +
-                "7. Never use INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE.\n\n" +
-                cachedSchema + "\n\n";
+    /**
+     * Level 1 — Build full message list: [system] + [history] + [current user msg]
+     */
+    private List<Map<String, Object>> buildGroqMessages(String systemPrompt,
+            List<Map<String, String>> history,
+            String currentUserMessage) {
+        List<Map<String, Object>> messages = new ArrayList<>();
+        messages.add(Map.of("role", "system", "content", systemPrompt));
 
-        return base + getIntentExamples(intent);
+        if (history != null) {
+            for (Map<String, String> turn : history) {
+                String role = turn.get("role");
+                String content = turn.get("content");
+                if (role == null || content == null || content.isBlank() || "system".equals(role))
+                    continue;
+                String trimmed = content.length() > 500 ? content.substring(0, 500) + "..." : content;
+                messages.add(Map.of("role", role, "content", trimmed));
+            }
+        }
+
+        messages.add(Map.of("role", "user", "content", currentUserMessage));
+        return messages;
+    }
+
+    /**
+     * Level 2 — Comprehensive system prompt with business rules + Level 6 schema
+     */
+    private String buildSqlSystemPrompt(Intent intent) {
+        return "You are an expert PostgreSQL analyst for an Indian insurance business.\n" +
+                "Output ONLY a single valid SELECT query — no markdown, no backticks, no explanation.\n\n" +
+
+                "=== BEHAVIOR RULES ===\n" +
+                "1. Understand follow-up questions using conversation history (full history is provided).\n" +
+                "2. 'this', 'those', 'them', 'these' = previous query result — modify that SQL, not a new one.\n" +
+                "3. If 'Previous SQL' is in the user message, MODIFY it for follow-up questions.\n" +
+                "4. 'give me only Auto' on a portfolio list → add WHERE p.vehicle_type ILIKE 'Auto'.\n" +
+                "5. SELECT only 4-8 relevant columns. NEVER SELECT *.\n" +
+                "6. Always filter by agent_id (value in user message).\n" +
+                "7. Use ILIKE for text searches. Use COALESCE for nullable columns.\n" +
+                "8. End with a semicolon. NEVER use INSERT/UPDATE/DELETE/DROP/ALTER.\n\n" +
+
+                "=== INSURANCE BUSINESS CONTEXT ===\n" +
+                "- premium = annual fee in Indian Rupees (INR)\n" +
+                "- ACTIVE = policy is valid; EXPIRED = lapsed; RENEWED = renewed for another year\n" +
+                "- A 'lost client' = status='EXPIRED' AND renewal_status='PENDING'\n" +
+                "- expiry_date = when coverage ends — always sort by this for renewal queries\n\n" +
+
+                cachedSchema + "\n\n" +
+                getIntentExamples(intent);
     }
 
     private String getIntentExamples(Intent intent) {
-        switch (intent) {
-
-            case PORTFOLIO:
-                return "PORTFOLIO queries -- group policies by type or category.\n\n" +
-                        "Q: how does my portfolio mix look\n" +
-                        "A: SELECT COALESCE(p.vehicle_type, p.policy_type, 'Other') AS category,\n" +
-                        "          COUNT(p.id) AS policy_count,\n" +
-                        "          SUM(p.premium) AS total_premium\n" +
+        return switch (intent) {
+            case PORTFOLIO ->
+                "=== PORTFOLIO EXAMPLES ===\n" +
+                        "Q: portfolio mix\n" +
+                        "A: SELECT COALESCE(p.vehicle_type,'Other') AS category, COUNT(p.id) AS policy_count, SUM(p.premium) AS total_premium\n"
+                        +
                         "   FROM policies p JOIN clients c ON p.client_id = c.id\n" +
                         "   WHERE c.agent_id = :agentId AND p.status = 'ACTIVE'\n" +
-                        "   GROUP BY category ORDER BY policy_count DESC;\n\n" +
-                        "Q: breakdown by insurer\n" +
-                        "A: SELECT COALESCE(p.insurer_name, 'Unknown') AS insurer,\n" +
-                        "          COUNT(p.id) AS policy_count, SUM(p.premium) AS total_premium\n" +
+                        "   GROUP BY category ORDER BY total_premium DESC;\n\n" +
+                        "Q: give me only Auto (follow-up)\n" +
+                        "A: SELECT c.full_name, p.policy_number, p.vehicle_type, p.premium, p.expiry_date, p.status\n" +
                         "   FROM policies p JOIN clients c ON p.client_id = c.id\n" +
-                        "   WHERE c.agent_id = :agentId\n" +
-                        "   GROUP BY insurer ORDER BY policy_count DESC;\n\n" +
-                        "Q: active vs expired policies\n" +
-                        "A: SELECT p.status, COUNT(p.id) AS count, SUM(p.premium) AS total_premium\n" +
-                        "   FROM policies p JOIN clients c ON p.client_id = c.id\n" +
-                        "   WHERE c.agent_id = :agentId\n" +
-                        "   GROUP BY p.status ORDER BY count DESC;\n";
+                        "   WHERE c.agent_id = :agentId AND p.vehicle_type ILIKE 'Auto'\n" +
+                        "   ORDER BY p.premium DESC;\n";
 
-            case REVENUE:
-                return "REVENUE queries -- sums, totals, monthly trends.\n\n" +
+            case REVENUE ->
+                "=== REVENUE EXAMPLES ===\n" +
                         "Q: total revenue this month\n" +
-                        "A: SELECT SUM(p.premium) AS total_revenue\n" +
-                        "   FROM policies p JOIN clients c ON p.client_id = c.id\n" +
+                        "A: SELECT SUM(p.premium) AS total_revenue FROM policies p JOIN clients c ON p.client_id = c.id\n"
+                        +
                         "   WHERE c.agent_id = :agentId AND p.status = 'ACTIVE'\n" +
                         "     AND DATE_TRUNC('month', p.created_at) = DATE_TRUNC('month', CURRENT_DATE);\n\n" +
-                        "Q: revenue last month\n" +
-                        "A: SELECT SUM(p.premium) AS total_revenue\n" +
-                        "   FROM policies p JOIN clients c ON p.client_id = c.id\n" +
-                        "   WHERE c.agent_id = :agentId\n" +
-                        "     AND p.created_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')\n" +
-                        "     AND p.created_at <  DATE_TRUNC('month', CURRENT_DATE);\n\n" +
-                        "Q: monthly revenue this year\n" +
-                        "A: SELECT TO_CHAR(p.created_at, 'Mon') AS month,\n" +
-                        "          EXTRACT(MONTH FROM p.created_at) AS month_num,\n" +
+                        "Q: monthly revenue breakdown this year\n" +
+                        "A: SELECT TO_CHAR(p.created_at,'Mon') AS month, EXTRACT(MONTH FROM p.created_at) AS month_num,\n"
+                        +
                         "          SUM(p.premium) AS total_revenue\n" +
                         "   FROM policies p JOIN clients c ON p.client_id = c.id\n" +
-                        "   WHERE c.agent_id = :agentId\n" +
-                        "     AND EXTRACT(YEAR FROM p.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)\n" +
-                        "   GROUP BY month, month_num ORDER BY month_num;\n\n" +
-                        "Q: top 5 policies by premium\n" +
-                        "A: SELECT c.full_name, p.policy_number, p.vehicle_type, p.premium, p.expiry_date\n" +
-                        "   FROM policies p JOIN clients c ON p.client_id = c.id\n" +
-                        "   WHERE c.agent_id = :agentId AND p.status = 'ACTIVE'\n" +
-                        "   ORDER BY p.premium DESC LIMIT 5;\n";
+                        "   WHERE c.agent_id = :agentId AND EXTRACT(YEAR FROM p.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)\n"
+                        +
+                        "   GROUP BY month, month_num ORDER BY month_num;\n";
 
-            case RENEWALS:
-                return "RENEWAL queries -- expiring, pending, renewed policies.\n\n" +
-                        "Q: policies expiring in the next 30 days\n" +
-                        "A: SELECT c.full_name, p.policy_number, p.vehicle_type,\n" +
-                        "          p.expiry_date, p.premium, p.renewal_status\n" +
+            case RENEWALS ->
+                "=== RENEWAL EXAMPLES ===\n" +
+                        "Q: policies expiring this month\n" +
+                        "A: SELECT c.full_name, p.policy_number, p.vehicle_type, p.expiry_date, p.premium, p.renewal_status\n"
+                        +
                         "   FROM policies p JOIN clients c ON p.client_id = c.id\n" +
                         "   WHERE c.agent_id = :agentId AND p.status = 'ACTIVE'\n" +
-                        "     AND p.expiry_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'\n" +
+                        "     AND p.expiry_date BETWEEN CURRENT_DATE AND (DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month - 1 day')\n"
+                        +
                         "   ORDER BY p.expiry_date ASC;\n\n" +
-                        "Q: policies expiring this week\n" +
-                        "A: SELECT c.full_name, c.phone_number, p.policy_number,\n" +
-                        "          p.vehicle_type, p.expiry_date\n" +
+                        "Q: how much of this is car and bike (follow-up)\n" +
+                        "A: SELECT COALESCE(p.vehicle_type,'Other') AS category, COUNT(p.id) AS policy_count, SUM(p.premium) AS total_premium\n"
+                        +
                         "   FROM policies p JOIN clients c ON p.client_id = c.id\n" +
                         "   WHERE c.agent_id = :agentId AND p.status = 'ACTIVE'\n" +
-                        "     AND p.expiry_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days'\n" +
-                        "   ORDER BY p.expiry_date ASC;\n\n" +
-                        "Q: renewals this month\n" +
-                        "A: SELECT COUNT(p.id) AS renewed_count, SUM(p.premium) AS renewed_premium\n" +
+                        "     AND p.expiry_date BETWEEN CURRENT_DATE AND (DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month - 1 day')\n"
+                        +
+                        "     AND p.vehicle_type ILIKE ANY(ARRAY['%Auto%','%Car%','%Bike%'])\n" +
+                        "   GROUP BY category;\n\n" +
+                        "Q: lost clients\n" +
+                        "A: SELECT c.full_name, c.phone_number, p.policy_number, p.vehicle_type, p.expiry_date, p.premium\n"
+                        +
                         "   FROM policies p JOIN clients c ON p.client_id = c.id\n" +
-                        "   WHERE c.agent_id = :agentId\n" +
-                        "     AND p.renewal_status IN ('AUTO_RENEWED','MANUAL_RENEWED','RENEWED')\n" +
-                        "     AND DATE_TRUNC('month', p.updated_at) = DATE_TRUNC('month', CURRENT_DATE);\n\n" +
-                        "Q: lost clients - expired with no renewal\n" +
-                        "A: SELECT c.full_name, c.phone_number, p.policy_number,\n" +
-                        "          p.vehicle_type, p.expiry_date, p.premium\n" +
-                        "   FROM policies p JOIN clients c ON p.client_id = c.id\n" +
-                        "   WHERE c.agent_id = :agentId\n" +
-                        "     AND p.status = 'EXPIRED' AND p.renewal_status = 'PENDING'\n" +
+                        "   WHERE c.agent_id = :agentId AND p.status = 'EXPIRED' AND p.renewal_status = 'PENDING'\n" +
                         "   ORDER BY p.expiry_date DESC;\n";
 
-            case CLIENTS:
-                return "CLIENT queries -- who, top, lost, contact details.\n\n" +
+            case CLIENTS ->
+                "=== CLIENT EXAMPLES ===\n" +
                         "Q: top 5 clients by premium\n" +
-                        "A: SELECT c.full_name, c.email, c.phone_number,\n" +
-                        "          COUNT(p.id) AS policy_count, SUM(p.premium) AS total_premium\n" +
+                        "A: SELECT c.full_name, c.email, c.phone_number, COUNT(p.id) AS policy_count, SUM(p.premium) AS total_premium\n"
+                        +
                         "   FROM clients c JOIN policies p ON c.id = p.client_id\n" +
-                        "   WHERE c.agent_id = :agentId\n" +
-                        "   GROUP BY c.id, c.full_name, c.email, c.phone_number\n" +
+                        "   WHERE c.agent_id = :agentId GROUP BY c.id, c.full_name, c.email, c.phone_number\n" +
                         "   ORDER BY total_premium DESC LIMIT 5;\n\n" +
-                        "Q: clients with multiple policies\n" +
+                        "Q: clients with no whatsapp\n" +
                         "A: SELECT c.full_name, c.email, c.phone_number, COUNT(p.id) AS policy_count\n" +
-                        "   FROM clients c JOIN policies p ON c.id = p.client_id\n" +
-                        "   WHERE c.agent_id = :agentId\n" +
-                        "   GROUP BY c.id, c.full_name, c.email, c.phone_number\n" +
-                        "   HAVING COUNT(p.id) > 1 ORDER BY policy_count DESC;\n\n" +
-                        "Q: new clients this month\n" +
-                        "A: SELECT c.full_name, c.email, c.phone_number, c.created_at\n" +
-                        "   FROM clients c\n" +
-                        "   WHERE c.agent_id = :agentId\n" +
-                        "     AND DATE_TRUNC('month', c.created_at) = DATE_TRUNC('month', CURRENT_DATE)\n" +
-                        "   ORDER BY c.created_at DESC;\n\n" +
-                        "Q: clients expiring soon with no whatsapp\n" +
-                        "A: SELECT c.full_name, c.email, c.phone_number, p.expiry_date, p.policy_number\n" +
-                        "   FROM clients c JOIN policies p ON c.id = p.client_id\n" +
-                        "   WHERE c.agent_id = :agentId AND p.status = 'ACTIVE'\n" +
-                        "     AND p.expiry_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'\n" +
-                        "     AND (c.whatsapp_number IS NULL OR c.whatsapp_number = '')\n" +
-                        "   ORDER BY p.expiry_date ASC;\n";
+                        "   FROM clients c LEFT JOIN policies p ON c.id = p.client_id\n" +
+                        "   WHERE c.agent_id = :agentId AND (c.whatsapp_number IS NULL OR c.whatsapp_number = '')\n" +
+                        "   GROUP BY c.id, c.full_name, c.email, c.phone_number ORDER BY policy_count DESC;\n";
 
-            case MESSAGES:
-                return "MESSAGE queries -- SMS/WhatsApp logs, delivery status.\n\n" +
-                        "Q: how many messages failed\n" +
+            case MESSAGES ->
+                "=== MESSAGE EXAMPLES ===\n" +
+                        "Q: failed messages\n" +
                         "A: SELECT ml.channel, COUNT(ml.id) AS failed_count\n" +
-                        "   FROM message_logs ml\n" +
-                        "   JOIN policies p ON ml.policy_id = p.id\n" +
-                        "   JOIN clients c ON p.client_id = c.id\n" +
-                        "   WHERE c.agent_id = :agentId AND ml.status = 'FAILED'\n" +
-                        "   GROUP BY ml.channel;\n\n" +
-                        "Q: clients with failed messages and no successful retry\n" +
-                        "A: SELECT c.full_name, c.phone_number, p.policy_number,\n" +
-                        "          p.expiry_date, ml.channel, ml.retry_count, ml.failure_reason\n" +
-                        "   FROM clients c\n" +
-                        "   JOIN policies p ON c.id = p.client_id\n" +
-                        "   JOIN message_logs ml ON p.id = ml.policy_id\n" +
-                        "   WHERE c.agent_id = :agentId AND ml.status = 'FAILED'\n" +
-                        "     AND NOT EXISTS (\n" +
-                        "         SELECT 1 FROM message_logs ml2\n" +
-                        "         WHERE ml2.policy_id = p.id\n" +
-                        "           AND ml2.channel = ml.channel\n" +
-                        "           AND ml2.status = 'SENT'\n" +
-                        "     )\n" +
-                        "   ORDER BY p.expiry_date ASC;\n\n" +
+                        "   FROM message_logs ml JOIN policies p ON ml.policy_id = p.id JOIN clients c ON p.client_id = c.id\n"
+                        +
+                        "   WHERE c.agent_id = :agentId AND ml.status = 'FAILED' GROUP BY ml.channel;\n\n" +
                         "Q: whatsapp success rate\n" +
                         "A: SELECT COUNT(*) AS total,\n" +
                         "          SUM(CASE WHEN ml.status = 'SENT' THEN 1 ELSE 0 END) AS successful,\n" +
                         "          ROUND(100.0 * SUM(CASE WHEN ml.status = 'SENT' THEN 1 ELSE 0 END) / NULLIF(COUNT(*),0), 2) AS success_rate_pct\n"
                         +
-                        "   FROM message_logs ml\n" +
-                        "   JOIN policies p ON ml.policy_id = p.id\n" +
-                        "   JOIN clients c ON p.client_id = c.id\n" +
+                        "   FROM message_logs ml JOIN policies p ON ml.policy_id = p.id JOIN clients c ON p.client_id = c.id\n"
+                        +
                         "   WHERE c.agent_id = :agentId AND ml.channel = 'WHATSAPP';\n";
 
-            case PERFORMANCE:
-                return "PERFORMANCE queries -- rates, conversion, KPIs.\n\n" +
+            case PERFORMANCE ->
+                "=== PERFORMANCE EXAMPLES ===\n" +
                         "Q: renewal conversion rate\n" +
-                        "A: SELECT\n" +
-                        "       COUNT(*) AS total_expiring,\n" +
+                        "A: SELECT COUNT(*) AS total_expiring,\n" +
                         "       SUM(CASE WHEN p.renewal_status IN ('AUTO_RENEWED','MANUAL_RENEWED','RENEWED') THEN 1 ELSE 0 END) AS renewed,\n"
                         +
                         "       ROUND(100.0 * SUM(CASE WHEN p.renewal_status IN ('AUTO_RENEWED','MANUAL_RENEWED','RENEWED') THEN 1 ELSE 0 END) / NULLIF(COUNT(*),0), 2) AS conversion_rate_pct\n"
                         +
                         "   FROM policies p JOIN clients c ON p.client_id = c.id\n" +
-                        "   WHERE c.agent_id = :agentId\n" +
-                        "     AND p.expiry_date BETWEEN CURRENT_DATE - INTERVAL '30 days' AND CURRENT_DATE;\n\n" +
-                        "Q: policies added this month vs last month\n" +
-                        "A: SELECT\n" +
-                        "       SUM(CASE WHEN DATE_TRUNC('month', p.created_at) = DATE_TRUNC('month', CURRENT_DATE) THEN 1 ELSE 0 END) AS this_month,\n"
-                        +
-                        "       SUM(CASE WHEN DATE_TRUNC('month', p.created_at) = DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') THEN 1 ELSE 0 END) AS last_month\n"
-                        +
-                        "   FROM policies p JOIN clients c ON p.client_id = c.id\n" +
-                        "   WHERE c.agent_id = :agentId;\n";
+                        "   WHERE c.agent_id = :agentId AND p.expiry_date BETWEEN CURRENT_DATE - INTERVAL '30 days' AND CURRENT_DATE;\n";
 
-            default:
-                return "GENERAL queries -- full business overview.\n\n" +
-                        "Q: give me a summary\n" +
-                        "A: SELECT\n" +
-                        "       COUNT(DISTINCT c.id) AS total_clients,\n" +
-                        "       COUNT(p.id) AS total_policies,\n" +
-                        "       SUM(CASE WHEN p.status = 'ACTIVE' THEN 1 ELSE 0 END) AS active_policies,\n" +
-                        "       SUM(CASE WHEN p.status = 'EXPIRED' THEN 1 ELSE 0 END) AS expired_policies,\n" +
+            default ->
+                "=== GENERAL EXAMPLES ===\n" +
+                        "Q: full summary\n" +
+                        "A: SELECT COUNT(DISTINCT c.id) AS total_clients, COUNT(p.id) AS total_policies,\n" +
+                        "       SUM(CASE WHEN p.status='ACTIVE' THEN 1 ELSE 0 END) AS active,\n" +
+                        "       SUM(CASE WHEN p.status='EXPIRED' THEN 1 ELSE 0 END) AS expired,\n" +
                         "       SUM(CASE WHEN p.expiry_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days' THEN 1 ELSE 0 END) AS expiring_soon,\n"
                         +
-                        "       COALESCE(SUM(CASE WHEN p.status = 'ACTIVE' THEN p.premium END), 0) AS active_premium\n"
+                        "       COALESCE(SUM(CASE WHEN p.status='ACTIVE' THEN p.premium END), 0) AS active_premium_inr\n"
                         +
-                        "   FROM policies p JOIN clients c ON p.client_id = c.id\n" +
-                        "   WHERE c.agent_id = :agentId;\n";
-        }
+                        "   FROM policies p JOIN clients c ON p.client_id = c.id WHERE c.agent_id = :agentId;\n";
+        };
     }
 
-    private String buildSqlUserMessage(String question, Long agentId, List<Map<String, String>> history) {
+    /**
+     * Level 3+4 — Build SQL user message with session memory context injected
+     */
+    private String buildSqlUserMessage(String question, Long agentId,
+            SessionMemory sessionMemory, boolean isReferencing) {
         StringBuilder msg = new StringBuilder();
 
-        if (history != null && history.size() >= 2) {
-            msg.append("Previous Q&A context (last ").append(Math.min(history.size() / 2, 3)).append(" exchanges):\n");
-
-            // Pair up user/assistant turns
-            int start = Math.max(0, history.size() - 6);
-            for (int i = start; i < history.size() - 1; i += 2) {
-                Map<String, String> userTurn = history.get(i);
-                Map<String, String> assistantTurn = (i + 1 < history.size()) ? history.get(i + 1) : null;
-
-                if ("user".equals(userTurn.get("role"))) {
-                    msg.append("Q: ").append(userTurn.get("content")).append("\n");
-                    if (assistantTurn != null && "assistant".equals(assistantTurn.get("role"))) {
-                        String ans = assistantTurn.get("content");
-                        // Truncate long answers
-                        msg.append("A: ").append(ans.length() > 150 ? ans.substring(0, 150) + "..." : ans).append("\n");
-                    }
-                }
+        if (sessionMemory != null) {
+            if (sessionMemory.lastSql() != null && !sessionMemory.lastSql().isBlank()) {
+                msg.append("=== PREVIOUS SQL (modify this for follow-up questions) ===\n")
+                        .append(sessionMemory.lastSql()).append("\n\n");
             }
-            msg.append("\n");
+            if (isReferencing && sessionMemory.lastResultSummary() != null) {
+                msg.append("=== PREVIOUS RESULT (what 'this'/'those' refers to) ===\n")
+                        .append(sessionMemory.lastResultSummary()).append("\n\n");
+            }
+            if (sessionMemory.lastTopic() != null) {
+                msg.append("Current topic: ").append(sessionMemory.lastTopic()).append("\n");
+            }
+            if (sessionMemory.lastCategories() != null && !sessionMemory.lastCategories().isEmpty()) {
+                msg.append("Categories in focus: ")
+                        .append(String.join(", ", sessionMemory.lastCategories())).append("\n");
+            }
         }
 
-        msg.append("Current question: ").append(question).append("\n")
+        if (isReferencing) {
+            msg.append("\nIMPORTANT: User references previous data. Modify Previous SQL if available.\n");
+        }
+
+        msg.append("\nQuestion: ").append(question).append("\n")
                 .append("Agent ID: ").append(agentId).append("\n")
                 .append("SQL:");
 
@@ -584,39 +674,33 @@ public class NLQueryService {
         if (raw == null)
             throw new RuntimeException("Groq returned null SQL");
         String cleaned = raw.strip()
-                .replaceAll("(?i)```sql\\s*", "")
-                .replaceAll("```", "")
-                .strip();
-        int selectIdx = cleaned.toUpperCase().indexOf("SELECT");
-        if (selectIdx > 0)
-            cleaned = cleaned.substring(selectIdx);
-        int semiIdx = cleaned.indexOf(";");
-        if (semiIdx != -1)
-            cleaned = cleaned.substring(0, semiIdx + 1);
+                .replaceAll("(?i)```sql\\s*", "").replaceAll("```", "").strip();
+        int idx = cleaned.toUpperCase().indexOf("SELECT");
+        if (idx > 0)
+            cleaned = cleaned.substring(idx);
+        int semi = cleaned.indexOf(";");
+        if (semi != -1)
+            cleaned = cleaned.substring(0, semi + 1);
         return cleaned.strip();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Step 3 - Execute SQL
+    // Execute SQL (safety-checked)
     // ─────────────────────────────────────────────────────────────────────────
 
     private String executeQuery(String sql, Long agentId) {
         String upper = sql.trim().toUpperCase();
+        if (!upper.startsWith("SELECT"))
+            throw new IllegalArgumentException(
+                    "Only SELECT allowed. Got: " + sql.substring(0, Math.min(80, sql.length())));
 
-        if (!upper.startsWith("SELECT")) {
-            throw new IllegalArgumentException("Only SELECT queries allowed. Got: "
-                    + sql.substring(0, Math.min(sql.length(), 80)));
-        }
-
-        String[] banned = { "INSERT", "UPDATE", "DELETE", "DROP", "TRUNCATE", "ALTER", "CREATE", "GRANT", "EXEC" };
-        for (String kw : banned) {
+        for (String kw : new String[] { "INSERT", "UPDATE", "DELETE", "DROP", "TRUNCATE", "ALTER", "CREATE", "GRANT",
+                "EXEC" })
             if (upper.contains(kw))
                 throw new IllegalArgumentException("Blocked keyword: " + kw);
-        }
 
-        if (!sql.contains(agentId.toString())) {
+        if (!sql.contains(agentId.toString()))
             throw new IllegalArgumentException("Query must be scoped to agent ID " + agentId);
-        }
 
         List<Map<String, Object>> rows = jdbc.queryForList(sql);
         if (rows.isEmpty())
@@ -624,81 +708,80 @@ public class NLQueryService {
 
         StringBuilder result = new StringBuilder("[\n");
         for (Map<String, Object> row : rows) {
-            result.append("  { ");
             List<String> pairs = new ArrayList<>();
-            for (Map.Entry<String, Object> col : row.entrySet()) {
+            for (Map.Entry<String, Object> col : row.entrySet())
                 pairs.add(col.getKey() + ": " + col.getValue());
-            }
-            result.append(String.join(", ", pairs)).append(" },\n");
+            result.append("  { ").append(String.join(", ", pairs)).append(" },\n");
         }
-        result.append("]");
-        return result.toString();
+        return result.append("]").toString();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Step 4 - Format answer
+    // Format Answer (Level 1: full history + Level 2: smart system prompt)
     // ─────────────────────────────────────────────────────────────────────────
 
-    private String formatAnswer(String question, String rawResult,
-            Intent intent, List<Map<String, String>> history) {
+    private String formatAnswer(String question, String rawResult, Intent intent,
+            List<Map<String, String>> history, SessionMemory newMemory) {
 
-        // Extract last assistant answer for continuity
-        String lastAnswer = "";
-        if (history != null) {
-            for (int i = history.size() - 1; i >= 0; i--) {
-                Map<String, String> turn = history.get(i);
-                if ("assistant".equals(turn.get("role")) && turn.get("content") != null) {
-                    String content = turn.get("content");
-                    lastAnswer = content.length() > 200 ? content.substring(0, 200) + "..." : content;
-                    break;
-                }
-            }
-        }
+        // Level 2 — business-aware formatter system prompt
+        String systemPrompt = "You are a friendly insurance business analyst assistant.\n" +
+                "Convert raw database results into clear, professional, business-focused answers.\n\n" +
+                "=== FORMATTING RULES ===\n" +
+                "- Indian Rupees format: Rs. 1,23,456 (use Indian number system: lakhs not millions)\n" +
+                "- Round percentages to 1 decimal place\n" +
+                "- Lists: max 10 items as bullet points\n" +
+                "- Single values / counts: 1-2 sentences\n" +
+                "- NEVER say 'No data found' unless result is literally [] with zero rows\n" +
+                "- NEVER mention SQL, database, columns, or technical terms\n" +
+                "- Use business language: 'policies', 'clients', 'premiums', 'renewals'\n\n" +
+                "=== CONVERSATION RULES ===\n" +
+                "- Full conversation history is provided — continue naturally from previous answers\n" +
+                "- If this is a follow-up filter, confirm what was filtered (e.g. 'Showing only Auto policies:')\n" +
+                "- Do NOT repeat information already given in the conversation\n\n" +
+                "Context: " + switch (intent) {
+                    case PORTFOLIO -> "User is asking about insurance portfolio distribution.";
+                    case REVENUE -> "User is asking about money and premiums in INR.";
+                    case RENEWALS -> "User is asking about policy renewals and expiry.";
+                    case CLIENTS -> "User is asking about their insurance clients.";
+                    case MESSAGES -> "User is asking about SMS/WhatsApp reminders.";
+                    case PERFORMANCE -> "User is asking about business KPIs.";
+                    default -> "User is asking a general insurance question.";
+                };
 
-        String intentHint = switch (intent) {
-            case PORTFOLIO -> "This is about policy type/category distribution.";
-            case REVENUE -> "This is about money and premium amounts in Indian Rupees.";
-            case RENEWALS -> "This is about policy renewals and expiry dates.";
-            case CLIENTS -> "This is about client/customer information.";
-            case MESSAGES -> "This is about SMS/WhatsApp reminders and delivery status.";
-            case PERFORMANCE -> "This is about business KPIs and conversion rates.";
-            default -> "This is a general insurance business question.";
-        };
+        String memCtx = (newMemory != null && newMemory.lastTopic() != null)
+                ? "Topic: " + newMemory.lastTopic() + "\n"
+                : "";
 
-        String systemPrompt = "You are a helpful insurance business analyst assistant.\n" +
-                "Convert the raw database result into a clear, friendly, business-focused answer.\n\n" +
-                "Rules:\n" +
-                "- Use Indian Rupees (INR) formatting (e.g. Rs. 1,23,456).\n" +
-                "- Round percentages to 1 decimal place.\n" +
-                "- If result is a list, show max 10 items as a readable bullet list.\n" +
-                "- If result is [] or empty, say 'No data found' and suggest checking filters.\n" +
-                "- Keep it concise: 1 sentence for single values, bullets for lists.\n" +
-                "- Never mention SQL, database, tables, or technical terms.\n" +
-                "- If this is a follow-up question, naturally continue from the previous answer.\n" +
-                "- Do not repeat information already given in the previous answer.\n";
-
-        String previousContext = lastAnswer.isEmpty()
-                ? ""
-                : "Previous answer (for continuity): \"" + lastAnswer + "\"\n";
-
-        String userMessage = intentHint + "\n"
-                + previousContext
+        String userMessage = memCtx
                 + "Question: \"" + question + "\"\n"
                 + "Database result: " + rawResult + "\n"
                 + "Answer:";
 
-        return callGroq(systemPrompt, userMessage).strip();
+        // Level 1 — full history to formatter too
+        List<Map<String, Object>> messages = buildGroqMessages(systemPrompt, history, userMessage);
+        return callGroq(messages).strip();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Groq API client
+    // Groq API Client
     // ─────────────────────────────────────────────────────────────────────────
 
-    @SuppressWarnings("unchecked")
+    /**
+     * Convenience overload for simple calls (summarization, follow-up expansion)
+     */
     private String callGroq(String systemPrompt, String userMessage) {
-        if (groqApiKey == null || groqApiKey.trim().isEmpty()) {
-            throw new RuntimeException("Groq API key is not configured.");
-        }
+        return callGroq(List.of(
+                Map.of("role", "system", "content", systemPrompt),
+                Map.of("role", "user", "content", userMessage)));
+    }
+
+    /**
+     * Level 1 — Main call, accepts full message list for proper multi-turn context
+     */
+    @SuppressWarnings("unchecked")
+    private String callGroq(List<Map<String, Object>> messages) {
+        if (groqApiKey == null || groqApiKey.trim().isEmpty())
+            throw new RuntimeException("Groq API key not configured.");
 
         try {
             org.springframework.http.client.SimpleClientHttpRequestFactory factory = new org.springframework.http.client.SimpleClientHttpRequestFactory();
@@ -710,18 +793,16 @@ public class NLQueryService {
             body.put("model", groqModel);
             body.put("temperature", 0);
             body.put("max_tokens", 1024);
-            body.put("messages", List.of(
-                    Map.of("role", "system", "content", systemPrompt),
-                    Map.of("role", "user", "content", userMessage)));
+            body.put("messages", messages);
 
             org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
             headers.set("Authorization", "Bearer " + groqApiKey);
             headers.set("Content-Type", "application/json");
 
-            org.springframework.http.HttpEntity<Map<String, Object>> entity = new org.springframework.http.HttpEntity<>(
-                    body, headers);
-
-            Map<?, ?> response = rest.postForObject(groqUrl, entity, Map.class);
+            Map<?, ?> response = rest.postForObject(
+                    groqUrl,
+                    new org.springframework.http.HttpEntity<>(body, headers),
+                    Map.class);
 
             if (response != null && response.containsKey("choices")) {
                 List<?> choices = (List<?>) response.get("choices");
@@ -732,8 +813,9 @@ public class NLQueryService {
                 }
             }
             throw new RuntimeException("Empty response from Groq.");
+
         } catch (org.springframework.web.client.HttpClientErrorException e) {
-            logger.error("[NLQuery] Groq error: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
+            logger.error("[NLQuery] Groq HTTP error: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
             throw new RuntimeException("Groq API error: " + e.getStatusCode());
         } catch (Exception e) {
             logger.error("[NLQuery] Groq call failed: {}", e.getMessage());

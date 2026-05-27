@@ -64,55 +64,58 @@ public class PolicyService {
      * set by PdfExtractionService — we just save it directly.
      */
     @Transactional
-    @CacheEvict(value = {"dashboardSummary", "renewalTrends", "revenueTrends", "policyDistribution", "aiInsights", "conversionFunnel", "policiesList"}, allEntries = true)
+    @CacheEvict(value = { "dashboardSummary", "renewalTrends", "revenueTrends", "policyDistribution", "aiInsights",
+            "conversionFunnel", "policiesList" }, allEntries = true)
     public PolicyWithClientResponse createPolicyWithClient(PolicyWithClientRequest request, String username) {
-        Agent agent = agentRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("Agent not found"));
+        logger.info("Creating policy for user: {} | Policy Number: {}", username, request.getPolicyNumber());
+        try {
+            Agent agent = agentRepository.findByUsername(username)
+                    .orElseThrow(() -> new RuntimeException("Agent not found: " + username));
 
-        // Find existing client by email or create a new one
-        Client client = clientRepository.findByEmail(request.getClientEmail())
-                .orElseGet(() -> {
-                    Client newClient = new Client();
-                    newClient.setFullName(request.getClientFullName());
-                    newClient.setEmail(request.getClientEmail());
-                    newClient.setPhoneNumber(request.getClientPhoneNumber());
-                    newClient.setWhatsappNumber(request.getClientWhatsappNumber());
-                    newClient.setAddress(request.getClientAddress());
-                    newClient.setAgent(agent);
-                    return clientRepository.save(newClient);
-                });
+            // Find existing client by email or create a new one
+            Client client = clientRepository.findByEmail(request.getClientEmail())
+                    .orElseGet(() -> {
+                        logger.info("Creating new client for email: {}", request.getClientEmail());
+                        Client newClient = new Client();
+                        newClient.setFullName(request.getClientFullName());
+                        newClient.setEmail(request.getClientEmail());
+                        newClient.setPhoneNumber(request.getClientPhoneNumber());
+                        newClient.setWhatsappNumber(request.getClientWhatsappNumber());
+                        newClient.setAddress(request.getClientAddress());
+                        newClient.setAgent(agent);
+                        return clientRepository.save(newClient);
+                    });
 
-        if (policyRepository.existsByPolicyNumber(request.getPolicyNumber())) {
-            throw new RuntimeException("Policy number already exists");
+            if (policyRepository.existsByPolicyNumber(request.getPolicyNumber())) {
+                logger.warn("Policy number {} already exists", request.getPolicyNumber());
+                throw new RuntimeException("Policy number already exists");
+            }
+            if (request.getExpiryDate().isBefore(request.getStartDate())) {
+                logger.warn("Invalid dates: Start {} | Expiry {}", request.getStartDate(), request.getExpiryDate());
+                throw new RuntimeException("Expiry date must be after start date");
+            }
+
+            Policy policy = new Policy();
+            policy.setPolicyNumber(request.getPolicyNumber());
+            policy.setPolicyType(request.getPolicyType() != null ? request.getPolicyType() : "VEHICLE");
+            policy.setVehicleType(request.getVehicleType());
+            policy.setRegistrationNumber(request.getRegistrationNumber());
+            policy.setInsurerName(request.getInsurerName());
+            policy.setStartDate(request.getStartDate());
+            policy.setExpiryDate(request.getExpiryDate());
+            policy.setPremium(request.getPremium());
+            policy.setPremiumFrequency(request.getPremiumFrequency());
+            policy.setDescription(request.getPolicyDescription());
+            policy.setStatus("ACTIVE");
+            policy.setClient(client);
+
+            policy = policyRepository.save(policy);
+            logger.info("Policy created successfully with ID: {}", policy.getId());
+            return mapToResponse(policy, client);
+        } catch (Exception e) {
+            logger.error("Error creating policy: {}", e.getMessage(), e);
+            throw e;
         }
-        if (request.getExpiryDate().isBefore(request.getStartDate())) {
-            throw new RuntimeException("Expiry date must be after start date");
-        }
-
-        Policy policy = new Policy();
-        policy.setPolicyNumber(request.getPolicyNumber());
-        policy.setPolicyType(request.getPolicyType() != null ? request.getPolicyType() : "VEHICLE");
-        policy.setVehicleType(request.getVehicleType());
-        policy.setRegistrationNumber(request.getRegistrationNumber());
-        policy.setInsurerName(request.getInsurerName());
-        policy.setStartDate(request.getStartDate());
-        policy.setExpiryDate(request.getExpiryDate());
-        policy.setPremium(request.getPremium());
-        policy.setPremiumFrequency(request.getPremiumFrequency());
-        policy.setDescription(request.getPolicyDescription());
-        policy.setStatus("ACTIVE");
-        policy.setClient(client);
-
-        // PDF storage disabled — pdfFilePath not used
-        // if (request.getPdfFilePath() != null && !request.getPdfFilePath().isBlank())
-        // {
-        // policy.setPdfFilePath(request.getPdfFilePath());
-        // logger.info("Policy {} linked to S3 file: {}", request.getPolicyNumber(),
-        // request.getPdfFilePath());
-        // }
-
-        policy = policyRepository.save(policy);
-        return mapToResponse(policy, client);
     }
 
     /**
@@ -143,7 +146,8 @@ public class PolicyService {
      * Update policy status.
      */
     @Transactional
-    @CacheEvict(value = {"dashboardSummary", "renewalTrends", "revenueTrends", "policyDistribution", "aiInsights", "conversionFunnel", "policiesList"}, allEntries = true)
+    @CacheEvict(value = { "dashboardSummary", "renewalTrends", "revenueTrends", "policyDistribution", "aiInsights",
+            "conversionFunnel", "policiesList" }, allEntries = true)
     public PolicyWithClientResponse updatePolicyStatus(Long policyId, String status) {
         Policy policy = policyRepository.findById(policyId)
                 .orElseThrow(() -> new RuntimeException("Policy not found"));
@@ -163,7 +167,8 @@ public class PolicyService {
      * @return updated policy with client information
      */
     @Transactional
-    @CacheEvict(value = {"dashboardSummary", "renewalTrends", "revenueTrends", "policyDistribution", "aiInsights", "conversionFunnel", "policiesList"}, allEntries = true)
+    @CacheEvict(value = { "dashboardSummary", "renewalTrends", "revenueTrends", "policyDistribution", "aiInsights",
+            "conversionFunnel", "policiesList" }, allEntries = true)
     public PolicyWithClientResponse confirmAndRenew(Long oldPolicyId, ConfirmRenewalRequest request) {
         // 1. Get the old policy
         Policy oldPolicy = policyRepository.findById(oldPolicyId)
@@ -245,7 +250,8 @@ public class PolicyService {
      * @return updated policy with client information
      */
     @Transactional
-    @CacheEvict(value = {"dashboardSummary", "renewalTrends", "revenueTrends", "policyDistribution", "aiInsights", "conversionFunnel", "policiesList"}, allEntries = true)
+    @CacheEvict(value = { "dashboardSummary", "renewalTrends", "revenueTrends", "policyDistribution", "aiInsights",
+            "conversionFunnel", "policiesList" }, allEntries = true)
     public PolicyWithClientResponse markAsManuallyRenewed(Long policyId, String notes, boolean renewed) {
         logger.info("Marking policy {} as manually handled. Renewed: {}", policyId, renewed);
 
@@ -289,7 +295,8 @@ public class PolicyService {
      * Also deletes the associated PDF from S3 if one exists.
      */
     @Transactional
-    @CacheEvict(value = {"dashboardSummary", "renewalTrends", "revenueTrends", "policyDistribution", "aiInsights", "conversionFunnel", "policiesList"}, allEntries = true)
+    @CacheEvict(value = { "dashboardSummary", "renewalTrends", "revenueTrends", "policyDistribution", "aiInsights",
+            "conversionFunnel", "policiesList" }, allEntries = true)
     public void deletePolicy(Long policyId) {
         Policy policy = policyRepository.findById(policyId)
                 .orElseThrow(() -> new RuntimeException("Policy not found"));
@@ -343,7 +350,8 @@ public class PolicyService {
     // ===== BACKWARD COMPATIBILITY =====
 
     @Transactional
-    @CacheEvict(value = {"dashboardSummary", "renewalTrends", "revenueTrends", "policyDistribution", "aiInsights", "conversionFunnel", "policiesList"}, allEntries = true)
+    @CacheEvict(value = { "dashboardSummary", "renewalTrends", "revenueTrends", "policyDistribution", "aiInsights",
+            "conversionFunnel", "policiesList" }, allEntries = true)
     public Policy createPolicy(PolicyRequest policyRequest) {
         Client client = clientRepository.findById(policyRequest.getClientId())
                 .orElseThrow(() -> new RuntimeException("Client not found"));
@@ -388,7 +396,8 @@ public class PolicyService {
     }
 
     @Transactional
-    @CacheEvict(value = {"dashboardSummary", "renewalTrends", "revenueTrends", "policyDistribution", "aiInsights", "conversionFunnel", "policiesList"}, allEntries = true)
+    @CacheEvict(value = { "dashboardSummary", "renewalTrends", "revenueTrends", "policyDistribution", "aiInsights",
+            "conversionFunnel", "policiesList" }, allEntries = true)
     public Policy savePolicy(Policy policy) {
         return policyRepository.save(policy);
     }

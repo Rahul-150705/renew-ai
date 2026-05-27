@@ -2,6 +2,7 @@ package com.renewai.service;
 
 import com.renewai.entity.Agent;
 import com.renewai.repository.AgentRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,7 +31,7 @@ public class NLQueryService {
     private static final Logger logger = LoggerFactory.getLogger(NLQueryService.class);
 
     // ── Return type ───────────────────────────────────────────────────────────
-    public record AskResult(String answer, String sql, SessionMemory sessionMemory) {
+    public record AskResult(String answer, String sql, Object data, SessionMemory sessionMemory) {
     }
 
     /**
@@ -225,12 +226,12 @@ public class NLQueryService {
         if (question == null || question.trim().isEmpty()) {
             return new AskResult(
                     "Please ask a question about your policies, clients, revenue, or messages.",
-                    null, sessionMemory);
+                    null, null, sessionMemory);
         }
 
         Agent agent = agentRepository.findByUsername(username).orElse(null);
         if (agent == null) {
-            return new AskResult("Error: Agent not found for username: " + username, null, sessionMemory);
+            return new AskResult("Error: Agent not found for username: " + username, null, null, sessionMemory);
         }
         Long agentId = agent.getId();
 
@@ -257,19 +258,21 @@ public class NLQueryService {
         } catch (Exception e) {
             logger.error("[NLQuery] SQL generation failed: {}", e.getMessage());
             return new AskResult(
-                    "I had trouble understanding that. Try asking about policies, revenue, clients, or messages.",
-                    null, sessionMemory);
+                    "I had trouble understanding that. Try asking related to policies, revenue, clients, or messages.",
+                    null, null, sessionMemory);
         }
 
         // Execute
+        List<Map<String, Object>> rows;
         String rawResult;
         try {
-            rawResult = executeQuery(sql, agentId);
+            rows = jdbc.queryForList(sql);
+            rawResult = new ObjectMapper().writeValueAsString(rows);
             logger.info("[NLQuery] Result (500 chars): {}",
                     rawResult.length() > 500 ? rawResult.substring(0, 500) + "..." : rawResult);
         } catch (Exception e) {
             logger.error("[NLQuery] Execution failed: {}", e.getMessage());
-            return new AskResult("I couldn't fetch that data. Please try rephrasing.", sql, sessionMemory);
+            return new AskResult("I couldn't fetch that data. Please try rephrasing.", sql, null, sessionMemory);
         }
 
         // Level 3 — Update session memory
@@ -278,10 +281,10 @@ public class NLQueryService {
         // Format answer
         try {
             String answer = formatAnswer(mappedQuestion, rawResult, intent, effectiveHistory, newMemory);
-            return new AskResult(answer, sql, newMemory);
+            return new AskResult(answer, sql, rows, newMemory);
         } catch (Exception e) {
             logger.error("[NLQuery] Formatting failed: {}", e.getMessage());
-            return new AskResult("Here's the raw data: " + rawResult, sql, newMemory);
+            return new AskResult("I collected the data but had trouble formatting the summary.", sql, rows, newMemory);
         }
     }
 
@@ -694,9 +697,12 @@ public class NLQueryService {
             throw new IllegalArgumentException(
                     "Only SELECT allowed. Got: " + sql.substring(0, Math.min(80, sql.length())));
 
-        for (String kw : new String[] { "INSERT", "UPDATE", "DELETE", "DROP", "TRUNCATE", "ALTER", "CREATE", "GRANT",
-                "EXEC" })
-            if (upper.contains(kw))
+        // Use word-boundary matching to avoid false positives
+        // (e.g. "created_at" should NOT match "CREATE", "EXTRACT" should NOT match
+        // "EXEC")
+        for (String kw : new String[] { "INSERT", "UPDATE", "DELETE", "DROP", "TRUNCATE", "ALTER",
+                "CREATE TABLE", "CREATE INDEX", "CREATE VIEW", "GRANT", "EXECUTE" })
+            if (java.util.regex.Pattern.compile("\\b" + kw + "\\b").matcher(upper).find())
                 throw new IllegalArgumentException("Blocked keyword: " + kw);
 
         if (!sql.contains(agentId.toString()))
@@ -706,14 +712,12 @@ public class NLQueryService {
         if (rows.isEmpty())
             return "[]";
 
-        StringBuilder result = new StringBuilder("[\n");
-        for (Map<String, Object> row : rows) {
-            List<String> pairs = new ArrayList<>();
-            for (Map.Entry<String, Object> col : row.entrySet())
-                pairs.add(col.getKey() + ": " + col.getValue());
-            result.append("  { ").append(String.join(", ", pairs)).append(" },\n");
+        try {
+            return new ObjectMapper().writeValueAsString(rows);
+        } catch (Exception e) {
+            logger.error("[NLQuery] JSON serialization failed: {}", e.getMessage());
+            return rows.toString(); // Fallback
         }
-        return result.append("]").toString();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -729,8 +733,12 @@ public class NLQueryService {
                 "=== FORMATTING RULES ===\n" +
                 "- Indian Rupees format: Rs. 1,23,456 (use Indian number system: lakhs not millions)\n" +
                 "- Round percentages to 1 decimal place\n" +
-                "- Lists: max 10 items as bullet points\n" +
-                "- Single values / counts: 1-2 sentences\n" +
+                "- If data contains multiple rows, return:\n" +
+                "  1. A brief, professional summary of the findings.\n" +
+                "  2. Important insights or patterns observed (e.g. 'Most expiring policies are for cars').\n" +
+                "  3. Relevant totals or averages at the bottom.\n" +
+                "- DO NOT generate Markdown Tables. Focus on text and summaries only.\n" +
+                "- If data is a single value or count: return a clear 1-2 sentence response.\n" +
                 "- NEVER say 'No data found' unless result is literally [] with zero rows\n" +
                 "- NEVER mention SQL, database, columns, or technical terms\n" +
                 "- Use business language: 'policies', 'clients', 'premiums', 'renewals'\n\n" +
@@ -752,14 +760,17 @@ public class NLQueryService {
                 ? "Topic: " + newMemory.lastTopic() + "\n"
                 : "";
 
-        String userMessage = memCtx
+        String userMessage = memCtx + "\n"
                 + "Question: \"" + question + "\"\n"
-                + "Database result: " + rawResult + "\n"
-                + "Answer:";
+                + "Data: " + rawResult + "\n\n"
+                + "Format the response professionally. provide a brief summary of findings and any key business insights. DO NOT generate a table.";
 
         // Level 1 — full history to formatter too
         List<Map<String, Object>> messages = buildGroqMessages(systemPrompt, history, userMessage);
-        return callGroq(messages).strip();
+        String answer = callGroq(messages).strip();
+        logger.info("[NLQuery] Formatted Answer (first 100 chars): {}", 
+                    answer.length() > 100 ? answer.substring(0, 100) + "..." : answer);
+        return answer;
     }
 
     // ─────────────────────────────────────────────────────────────────────────

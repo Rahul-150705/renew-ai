@@ -53,6 +53,7 @@ public class AgentQueryController {
         Map<String, Object> response = new HashMap<>();
         response.put("answer", answer);
         response.put("sql", result.sql());
+        response.put("data", result.data());
         if (result.sessionMemory() != null) {
             response.put("lastTopic", result.sessionMemory().lastTopic());
             response.put("lastCategories", result.sessionMemory().lastCategories());

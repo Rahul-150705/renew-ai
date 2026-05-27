@@ -5,6 +5,7 @@ import com.renewai.dto.ManualRenewalRequest;
 import com.renewai.dto.PolicyWithClientRequest;
 import com.renewai.dto.PolicyWithClientResponse;
 import com.renewai.service.PolicyService;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -27,7 +28,7 @@ public class PolicyController {
 
     @PostMapping("/create")
     public ResponseEntity<PolicyWithClientResponse> createPolicy(
-            @RequestBody PolicyWithClientRequest request,
+            @Valid @RequestBody PolicyWithClientRequest request,
             Authentication authentication) {
         return ResponseEntity.ok(policyService.createPolicyWithClient(request, authentication.getName()));
     }

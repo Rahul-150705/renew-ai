@@ -17,11 +17,21 @@ public class AgentQueryController {
     @Autowired
     private NLQueryService nlQueryService;
 
+    @Autowired
+    private com.renewai.service.RateLimitingService rateLimitingService;
+
     @SuppressWarnings("unchecked")
     @PostMapping("/ask")
     public ResponseEntity<Map<String, Object>> ask(
             @RequestBody Map<String, Object> body,
             Authentication auth) {
+
+        io.github.bucket4j.Bucket bucket = rateLimitingService.resolveAgentQueryBucket(auth.getName());
+        if (!bucket.tryConsume(1)) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "Too many questions. Please wait a moment before trying again.");
+            return ResponseEntity.status(429).body(error);
+        }
 
         String question = (String) body.get("question");
         List<Map<String, String>> history = (List<Map<String, String>>) body.get("history");

@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
 import java.util.Map;
+import jakarta.servlet.http.HttpServletRequest;
 
 /**
  * Authentication Controller
@@ -26,6 +27,9 @@ public class AuthController {
     
     @Autowired
     private AuthService authService;
+
+    @Autowired
+    private com.renewai.service.RateLimitingService rateLimitingService;
     
     /**
      * Agent login endpoint
@@ -34,7 +38,14 @@ public class AuthController {
      * @return JWT token and agent details
      */
     @PostMapping("/login")
-    public ResponseEntity<?> login(@Valid @RequestBody LoginRequest loginRequest) {
+    public ResponseEntity<?> login(@Valid @RequestBody LoginRequest loginRequest, HttpServletRequest request) {
+        io.github.bucket4j.Bucket bucket = rateLimitingService.resolveAuthBucket(request.getRemoteAddr());
+        if (!bucket.tryConsume(1)) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Too many login attempts. Please try again later.");
+            return ResponseEntity.status(429).body(error);
+        }
+
         try {
             LoginResponse response = authService.login(loginRequest);
             return ResponseEntity.ok(response);
@@ -51,14 +62,21 @@ public class AuthController {
      * POST /api/auth/register or /api/auth/signup
      */
     @PostMapping({"/register", "/signup"})
-    public ResponseEntity<?> register(@Valid @RequestBody RegistrationRequest request) {
+    public ResponseEntity<?> register(@Valid @RequestBody RegistrationRequest authRequest, HttpServletRequest request) {
+        io.github.bucket4j.Bucket bucket = rateLimitingService.resolveAuthBucket(request.getRemoteAddr());
+        if (!bucket.tryConsume(1)) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Too many registration attempts. Please try again later.");
+            return ResponseEntity.status(429).body(error);
+        }
+
         try {
             Agent agent = new Agent();
-            agent.setUsername(request.getUsername());
-            agent.setEmail(request.getEmail());
-            agent.setPassword(request.getPassword());
-            agent.setFullName(request.getFullName());
-            agent.setPhoneNumber(request.getPhoneNumber());
+            agent.setUsername(authRequest.getUsername());
+            agent.setEmail(authRequest.getEmail());
+            agent.setPassword(authRequest.getPassword());
+            agent.setFullName(authRequest.getFullName());
+            agent.setPhoneNumber(authRequest.getPhoneNumber());
 
             Agent registeredAgent = authService.registerAgent(agent);
             

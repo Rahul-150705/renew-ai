@@ -33,6 +33,9 @@ public class MessageLogController {
     @Autowired
     private RenewalSchedulerService renewalSchedulerService;
 
+    @Autowired
+    private com.renewai.service.RateLimitingService rateLimitingService;
+
     /**
      * GET /api/messages/logs
      * Retrieve all message logs sorted by most recent first
@@ -71,7 +74,14 @@ public class MessageLogController {
      * Triggers the system to scan for expiring policies and send reminders
      */
     @PostMapping("/send-bulk")
-    public ResponseEntity<?> sendBulkReminders() {
+    public ResponseEntity<?> sendBulkReminders(org.springframework.security.core.Authentication auth) {
+        io.github.bucket4j.Bucket bucket = rateLimitingService.resolveBulkMessageBucket(auth.getName());
+        if (!bucket.tryConsume(1)) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Bulk send rate limit reached. Please wait a moment.");
+            return ResponseEntity.status(429).body(error);
+        }
+
         try {
             renewalSchedulerService.triggerManualReminderCheck();
             Map<String, String> response = new HashMap<>();

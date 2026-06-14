@@ -250,29 +250,34 @@ public class NLQueryService {
         // Level 7 — Summarize history if too long
         List<Map<String, String>> effectiveHistory = maybeSummarizeHistory(history);
 
-        // Generate SQL
-        String sql;
-        try {
-            sql = generateSql(mappedQuestion, agentId, intent, effectiveHistory, sessionMemory, isReferencing);
-            logger.info("[NLQuery] SQL:\n{}", sql);
-        } catch (Exception e) {
-            logger.error("[NLQuery] SQL generation failed: {}", e.getMessage());
-            return new AskResult(
-                    "I had trouble understanding that. Try asking related to policies, revenue, clients, or messages.",
-                    null, null, sessionMemory);
-        }
+        // Generate SQL and Execute with Self-Correction loop
+        String sql = null;
+        List<Map<String, Object>> rows = null;
+        String rawResult = null;
+        String lastError = null;
 
-        // Execute
-        List<Map<String, Object>> rows;
-        String rawResult;
-        try {
-            rows = jdbc.queryForList(sql);
-            rawResult = new ObjectMapper().writeValueAsString(rows);
-            logger.info("[NLQuery] Result (500 chars): {}",
-                    rawResult.length() > 500 ? rawResult.substring(0, 500) + "..." : rawResult);
-        } catch (Exception e) {
-            logger.error("[NLQuery] Execution failed: {}", e.getMessage());
-            return new AskResult("I couldn't fetch that data. Please try rephrasing.", sql, null, sessionMemory);
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try {
+                // Generate SQL (passing error context if this is a retry)
+                sql = generateSql(mappedQuestion, agentId, intent, effectiveHistory, sessionMemory, isReferencing, sql, lastError);
+                if (attempt > 1) {
+                    logger.info("[NLQuery] Retry Attempt {}: New SQL generated", attempt);
+                }
+                logger.info("[NLQuery] Testing SQL:\n{}", sql);
+
+                // Execute
+                rows = jdbc.queryForList(sql);
+                rawResult = new ObjectMapper().writeValueAsString(rows);
+                logger.info("[NLQuery] SQL success on attempt {}", attempt);
+                break; // Success! Exit loop
+            } catch (Exception e) {
+                lastError = e.getMessage();
+                logger.warn("[NLQuery] Attempt {} failed: {}", attempt, lastError);
+                if (attempt == 2) {
+                    // Exhausted retries
+                    return new AskResult("I had trouble fetching that data even after correction. Please try rephrasing your question.", sql, null, sessionMemory);
+                }
+            }
         }
 
         // Level 3 — Update session memory
@@ -465,9 +470,9 @@ public class NLQueryService {
 
     private String generateSql(String question, Long agentId, Intent intent,
             List<Map<String, String>> history,
-            SessionMemory sessionMemory, boolean isReferencing) {
+            SessionMemory sessionMemory, boolean isReferencing, String failedSql, String error) {
         String systemPrompt = buildSqlSystemPrompt(intent);
-        String userMessage = buildSqlUserMessage(question, agentId, sessionMemory, isReferencing);
+        String userMessage = buildSqlUserMessage(question, agentId, sessionMemory, isReferencing, failedSql, error);
         // Level 1 — full history to Groq
         List<Map<String, Object>> messages = buildGroqMessages(systemPrompt, history, userMessage);
         return cleanSql(callGroq(messages));
@@ -641,11 +646,19 @@ public class NLQueryService {
      * Level 3+4 — Build SQL user message with session memory context injected
      */
     private String buildSqlUserMessage(String question, Long agentId,
-            SessionMemory sessionMemory, boolean isReferencing) {
+            SessionMemory sessionMemory, boolean isReferencing, String failedSql, String error) {
         StringBuilder msg = new StringBuilder();
 
+        if (failedSql != null && error != null) {
+            msg.append("=== !!! ATTENTION: PREVIOUS SQL FAILED !!! ===\n")
+               .append("The following SQL was generated previously but threw an error:\n")
+               .append(failedSql).append("\n\n")
+               .append("ERROR MESSAGE: ").append(error).append("\n")
+               .append("Please analyze the error and provide a CORRECTED SQL query that fixes the issue.\n\n");
+        }
+
         if (sessionMemory != null) {
-            if (sessionMemory.lastSql() != null && !sessionMemory.lastSql().isBlank()) {
+            if (sessionMemory.lastSql() != null && !sessionMemory.lastSql().isBlank() && failedSql == null) {
                 msg.append("=== PREVIOUS SQL (modify this for follow-up questions) ===\n")
                         .append(sessionMemory.lastSql()).append("\n\n");
             }
@@ -662,7 +675,7 @@ public class NLQueryService {
             }
         }
 
-        if (isReferencing) {
+        if (isReferencing && failedSql == null) {
             msg.append("\nIMPORTANT: User references previous data. Modify Previous SQL if available.\n");
         }
 

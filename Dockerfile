@@ -17,4 +17,9 @@ EXPOSE 8080
 
 # Run the application
 # We use the PORT environment variable if provided by Render
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["java", \
+  "-Xms64m", \
+  "-Xmx256m", \
+  "-XX:TieredStopAtLevel=1", \
+  "-Djava.security.egd=file:/dev/./urandom", \
+  "-jar", "app.jar"]

@@ -14,12 +14,19 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.web.multipart.MultipartFile;
+import com.renewai.dto.PolicyExtractionResponse;
+import com.renewai.service.PdfExtractionService;
+
 @RestController
 @RequestMapping("/api/policies")
 public class PolicyController {
 
     @Autowired
     private PolicyService policyService;
+
+    @Autowired
+    private PdfExtractionService pdfExtractionService;
 
     @GetMapping
     public ResponseEntity<List<PolicyWithClientResponse>> getAllPolicies(Authentication authentication) {
@@ -63,5 +70,17 @@ public class PolicyController {
     public ResponseEntity<Void> deletePolicy(@PathVariable Long id) {
         policyService.deletePolicy(id);
         return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/extract-from-pdf")
+    public ResponseEntity<PolicyExtractionResponse> extractFromPdf(@RequestParam("file") MultipartFile file) {
+        try {
+            return ResponseEntity.ok(pdfExtractionService.extractPolicyData(file));
+        } catch (Exception e) {
+            PolicyExtractionResponse errorResponse = new PolicyExtractionResponse();
+            errorResponse.setSuccess(false);
+            errorResponse.setMessage("Error extracting PDF: " + e.getMessage());
+            return ResponseEntity.badRequest().body(errorResponse);
+        }
     }
 }

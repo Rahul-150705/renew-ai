@@ -17,8 +17,6 @@ public class PolicyWithClientRequest {
     @NotBlank(message = "Client full name is required")
     private String clientFullName;
 
-    @NotBlank(message = "Client email is required")
-    @Email(message = "Invalid email format")
     private String clientEmail;
 
     @NotBlank(message = "Client phone number is required")

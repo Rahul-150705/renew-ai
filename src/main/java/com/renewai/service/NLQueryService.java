@@ -741,32 +741,29 @@ public class NLQueryService {
             List<Map<String, String>> history, SessionMemory newMemory) {
 
         // Level 2 — business-aware formatter system prompt
-        String systemPrompt = "You are a friendly insurance business analyst assistant.\n" +
-                "Convert raw database results into clear, professional, business-focused answers.\n\n" +
-                "=== FORMATTING RULES ===\n" +
-                "- Indian Rupees format: Rs. 1,23,456 (use Indian number system: lakhs not millions)\n" +
-                "- Round percentages to 1 decimal place\n" +
-                "- If data contains multiple rows, return:\n" +
-                "  1. A brief, professional summary of the findings.\n" +
-                "  2. Important insights or patterns observed (e.g. 'Most expiring policies are for cars').\n" +
-                "  3. Relevant totals or averages at the bottom.\n" +
-                "- DO NOT generate Markdown Tables. Focus on text and summaries only.\n" +
-                "- If data is a single value or count: return a clear 1-2 sentence response.\n" +
-                "- NEVER say 'No data found' unless result is literally [] with zero rows\n" +
-                "- NEVER mention SQL, database, columns, or technical terms\n" +
-                "- Use business language: 'policies', 'clients', 'premiums', 'renewals'\n\n" +
-                "=== CONVERSATION RULES ===\n" +
-                "- Full conversation history is provided — continue naturally from previous answers\n" +
-                "- If this is a follow-up filter, confirm what was filtered (e.g. 'Showing only Auto policies:')\n" +
-                "- Do NOT repeat information already given in the conversation\n\n" +
+        String systemPrompt = "You are an expert insurance business analyst and professional communicator.\n" +
+                "Return ONLY a structured JSON object for the user's report. No text before or after.\n\n" +
+                "=== JSON STRUCTURE ===\n" +
+                "{\n" +
+                "  \"header\": \"Short bold title (e.g., 'Portfolio Analysis')\",\n" +
+                "  \"summary\": \"One clear, natural, and professional sentence (e.g., 'Of the 5 policies expiring this week, most cover Auto vehicles.')\",\n" +
+                "  \"insights\": [\"High-level business observation 1\", \"High-level business observation 2\"],\n" +
+                "  \"recommendation\": \"A short professional action step\"\n" +
+                "}\n\n" +
+                "=== RULES ===\n" +
+                "- Return ONLY valid JSON. No markdown backticks.\n" +
+                "- WRITTEN STYLE: Use high-quality, natural English. Avoid repetitive or robotic phrasing like 'The majority of these policies belong to...'. Instead use: 'X of the Y total policies are...', 'Auto leads with 5 policies...', or 'Renewals are concentrated in the Auto segment.'\n" +
+                "- Count records accurately. insights should be business-relevant (e.g., mention trends or anomalies).\n" +
+                "- Use Rs. with Indian numbering (Rs. 9,350).\n" +
+                "- Format everything with a premium, professional tone.\n\n" +
                 "Context: " + switch (intent) {
-                    case PORTFOLIO -> "User is asking about insurance portfolio distribution.";
-                    case REVENUE -> "User is asking about money and premiums in INR.";
-                    case RENEWALS -> "User is asking about policy renewals and expiry.";
-                    case CLIENTS -> "User is asking about their insurance clients.";
-                    case MESSAGES -> "User is asking about SMS/WhatsApp reminders.";
-                    case PERFORMANCE -> "User is asking about business KPIs.";
-                    default -> "User is asking a general insurance question.";
+                    case PORTFOLIO -> "Portfolio mix.";
+                    case REVENUE -> "Revenue performance.";
+                    case RENEWALS -> "Policy expirations.";
+                    case CLIENTS -> "Client demographics.";
+                    case MESSAGES -> "Communication health.";
+                    case PERFORMANCE -> "Business growth.";
+                    default -> "Information report.";
                 };
 
         String memCtx = (newMemory != null && newMemory.lastTopic() != null)
@@ -774,9 +771,9 @@ public class NLQueryService {
                 : "";
 
         String userMessage = memCtx + "\n"
-                + "Question: \"" + question + "\"\n"
+                + "User Question: \"" + question + "\"\n"
                 + "Data: " + rawResult + "\n\n"
-                + "Format the response professionally. provide a brief summary of findings and any key business insights. DO NOT generate a table.";
+                + "Generate the JSON report object based on this data.";
 
         // Level 1 — full history to formatter too
         List<Map<String, Object>> messages = buildGroqMessages(systemPrompt, history, userMessage);

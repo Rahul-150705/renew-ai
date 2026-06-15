@@ -21,6 +21,9 @@ public class PolicyExtractionResponse {
     // Policy Information
     private String policyNumber;
     private String policyType;
+    private String vehicleType;
+    private String registrationNumber;
+    private String insurerName;
     private String startDate;
     private String expiryDate;
     private String premium;

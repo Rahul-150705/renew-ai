@@ -29,7 +29,7 @@ public class PdfExtractionService {
     @Value("${groq.api.url:https://api.groq.com/openai/v1/chat/completions}")
     private String groqApiUrl;
 
-    @Value("${groq.model:llama-3.1-8b-instant}")
+    @Value("${groq.model:llama-3.3-70b-versatile}")
     private String groqModel;
 
     private final ObjectMapper objectMapper = new ObjectMapper();

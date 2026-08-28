@@ -7,10 +7,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 import jakarta.annotation.PostConstruct;
@@ -18,118 +21,136 @@ import jakarta.annotation.PostConstruct;
 /**
  * Cloud Storage Service - AWS S3
  *
- * Handles all PDF uploads and deletions.
- * Stores PDFs in S3 and returns a permanent public URL.
+ * Stores policy PDFs in S3, keyed by the owning agent so files stay
+ * partitioned per agent:
  *
- * S3 folder structure:
- *   policies/{clientEmail}/{policyNumber}.pdf
+ *   policies/agent-{agentId}/{policyNumber}.pdf
  *
- * The URL is stored directly in policy.pdfFilePath in the database.
- * No files are written to local disk at any point.
+ * Only the S3 <b>key</b> is persisted in {@code policy.pdfFilePath}. Files are
+ * never made public and are never written to local disk — they are streamed
+ * back to the browser by the backend after an ownership check
+ * (see {@link PolicyService#getPolicyPdf}).
+ *
+ * If the AWS properties are not configured the service starts in a disabled
+ * state: PDF upload/view return a clear error, while PDF text extraction
+ * (Groq) keeps working.
  */
-// @Service  // PDF storage disabled
+@Service
 public class CloudStorageService {
 
     private static final Logger logger = LoggerFactory.getLogger(CloudStorageService.class);
 
-    @Value("${aws.s3.bucket-name}")
+    @Value("${aws.s3.bucket:}")
     private String bucketName;
 
-    @Value("${aws.s3.region}")
+    @Value("${aws.s3.region:ap-south-1}")
     private String region;
 
-    @Value("${aws.access-key-id}")
+    @Value("${aws.access-key-id:}")
     private String accessKeyId;
 
-    @Value("${aws.secret-access-key}")
+    @Value("${aws.secret-access-key:}")
     private String secretAccessKey;
 
     private S3Client s3Client;
+    private boolean enabled = false;
 
-    /**
-     * Initialize the S3 client after properties are injected.
-     */
+    /** Value object returned when downloading a PDF. */
+    public record StoredFile(byte[] bytes, String contentType) {
+    }
+
     @PostConstruct
     public void init() {
+        if (isBlank(bucketName) || isBlank(accessKeyId) || isBlank(secretAccessKey)) {
+            logger.warn("S3 not configured (aws.s3.bucket / aws.access-key-id / aws.secret-access-key missing). "
+                    + "Policy PDF storage is DISABLED. PDF extraction is unaffected.");
+            return;
+        }
         this.s3Client = S3Client.builder()
                 .region(Region.of(region))
                 .credentialsProvider(StaticCredentialsProvider.create(
-                        AwsBasicCredentials.create(accessKeyId, secretAccessKey)
-                ))
+                        AwsBasicCredentials.create(accessKeyId, secretAccessKey)))
                 .build();
+        this.enabled = true;
         logger.info("S3 client initialized — bucket: {}, region: {}", bucketName, region);
     }
 
-    /**
-     * Upload a policy PDF to S3.
-     *
-     * S3 key:  policies/{sanitizedEmail}/{policyNumber}.pdf
-     * URL:     https://{bucket}.s3.{region}.amazonaws.com/policies/{email}/{policyNumber}.pdf
-     *
-     * @param file         the uploaded PDF file
-     * @param clientEmail  the client's email (used as folder name)
-     * @param policyNumber the extracted policy number (used as filename)
-     * @return public S3 URL of the uploaded file
-     */
-    public String uploadPdf(MultipartFile file, String clientEmail, String policyNumber) throws Exception {
-        // Sanitize email for safe use in S3 key
-        String safeEmail = (clientEmail != null && !clientEmail.isBlank())
-                ? clientEmail.trim().toLowerCase().replaceAll("[^a-z0-9._-]", "_")
-                : "unknown";
-
-        // Sanitize policy number for safe use as filename
-        String safePolicy = (policyNumber != null && !policyNumber.isBlank())
-                ? policyNumber.trim().replaceAll("[^a-zA-Z0-9._-]", "_")
-                : "unknown_" + System.currentTimeMillis();
-
-        String s3Key = "policies/" + safeEmail + "/" + safePolicy + ".pdf";
-
-        logger.info("Uploading PDF to S3: {}", s3Key);
-
-        PutObjectRequest putRequest = PutObjectRequest.builder()
-                .bucket(bucketName)
-                .key(s3Key)
-                .contentType("application/pdf")
-                .build();
-
-        s3Client.putObject(putRequest, RequestBody.fromBytes(file.getBytes()));
-
-        String url = "https://" + bucketName + ".s3." + region + ".amazonaws.com/" + s3Key;
-        logger.info("Upload successful. URL: {}", url);
-        return url;
+    public boolean isEnabled() {
+        return enabled;
     }
 
     /**
-     * Delete a PDF from S3 using its URL.
-     * Extracts the S3 key from the URL and deletes the object.
+     * Upload a policy PDF to S3 under the owning agent's prefix.
      *
-     * Called when a policy is deleted so S3 stays in sync with the DB.
-     *
-     * @param fileUrl the full S3 URL stored in policy.pdfFilePath
+     * @param file         the uploaded PDF
+     * @param agentId      id of the agent that owns the policy
+     * @param policyNumber the policy number (used as the file name)
+     * @return the S3 object key stored in {@code policy.pdfFilePath}
      */
-    public void deleteFile(String fileUrl) {
-        if (fileUrl == null || fileUrl.isBlank()) return;
+    public String uploadPolicyPdf(MultipartFile file, Long agentId, String policyNumber) throws Exception {
+        ensureEnabled();
 
+        String safePolicy = (policyNumber != null && !policyNumber.isBlank())
+                ? policyNumber.trim().replaceAll("[^a-zA-Z0-9._-]", "_")
+                : "policy_" + System.currentTimeMillis();
+
+        String key = "policies/agent-" + agentId + "/" + safePolicy + ".pdf";
+
+        logger.info("Uploading policy PDF to S3: {}", key);
+        s3Client.putObject(
+                PutObjectRequest.builder()
+                        .bucket(bucketName)
+                        .key(key)
+                        .contentType("application/pdf")
+                        .build(),
+                RequestBody.fromBytes(file.getBytes()));
+        logger.info("Upload successful: {}", key);
+        return key;
+    }
+
+    /** Download a stored PDF by its S3 key. */
+    public StoredFile downloadPolicyPdf(String key) {
+        ensureEnabled();
+        ResponseBytes<GetObjectResponse> obj = s3Client.getObjectAsBytes(
+                GetObjectRequest.builder().bucket(bucketName).key(key).build());
+        String contentType = obj.response().contentType();
+        return new StoredFile(obj.asByteArray(),
+                contentType != null ? contentType : "application/pdf");
+    }
+
+    /**
+     * Delete a stored PDF. Accepts either a bare S3 key or a legacy full S3 URL.
+     * Never throws — a storage cleanup failure must not block policy deletion.
+     */
+    public void deleteFile(String keyOrUrl) {
+        if (!enabled || keyOrUrl == null || keyOrUrl.isBlank()) {
+            return;
+        }
         try {
-            // Extract key from URL:
-            // https://{bucket}.s3.{region}.amazonaws.com/{key} → {key}
-            int idx = fileUrl.indexOf(".amazonaws.com/");
-            if (idx == -1) {
-                logger.warn("Not a valid S3 URL, skipping delete: {}", fileUrl);
-                return;
+            String key = keyOrUrl;
+            int idx = keyOrUrl.indexOf(".amazonaws.com/");
+            if (idx != -1) {
+                key = keyOrUrl.substring(idx + ".amazonaws.com/".length());
             }
-            String s3Key = fileUrl.substring(idx + ".amazonaws.com/".length());
-
             s3Client.deleteObject(DeleteObjectRequest.builder()
                     .bucket(bucketName)
-                    .key(s3Key)
+                    .key(key)
                     .build());
-
-            logger.info("Deleted from S3: {}", s3Key);
-
+            logger.info("Deleted from S3: {}", key);
         } catch (Exception e) {
-            // Log but don't throw — S3 deletion failure should not break policy deletion
-            logger.warn("Could not delete S3 file ({}): {}", fileUrl, e.getMessage());
+            logger.warn("Could not delete S3 file ({}): {}", keyOrUrl, e.getMessage());
         }
+    }
+
+    private void ensureEnabled() {
+        if (!enabled) {
+            throw new IllegalStateException(
+                    "PDF storage is not configured on the server. Set AWS_S3_BUCKET, "
+                            + "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.");
+        }
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.trim().isEmpty();
     }
 }

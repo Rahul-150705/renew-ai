@@ -31,8 +31,8 @@ public class PolicyWithClientResponse {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
-    // PDF storage disabled
-    // private boolean hasPdf;
+    // True when a policy document is stored and viewable via GET /api/policies/{id}/pdf
+    private boolean hasPdf;
 
     // Client Info
     private Long clientId;

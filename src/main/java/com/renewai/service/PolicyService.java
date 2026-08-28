@@ -18,6 +18,9 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+
+import com.renewai.exception.ResourceNotFoundException;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -51,8 +54,19 @@ public class PolicyService {
     @Autowired
     private MessageLogRepository messageLogRepository;
 
-    // @Autowired // PDF storage disabled
-    // private CloudStorageService cloudStorageService;
+    @Autowired
+    private CloudStorageService cloudStorageService;
+
+    /**
+     * Load a policy by id, but only if it belongs to the given agent.
+     * Throws 404 otherwise so agents cannot probe other agents' policy ids.
+     */
+    private Policy getOwnedPolicy(Long policyId, String username) {
+        Agent agent = agentRepository.findByUsername(username)
+                .orElseThrow(() -> new ResourceNotFoundException("Agent not found: " + username));
+        return policyRepository.findByIdAndAgentId(policyId, agent.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Policy not found"));
+    }
 
     /**
      * Create a new insurance policy with client details.
@@ -134,23 +148,61 @@ public class PolicyService {
     }
 
     /**
-     * Get policy by ID with client information.
+     * Get policy by ID with client information — scoped to the requesting agent.
      */
-    public PolicyWithClientResponse getPolicyWithClientById(Long policyId) {
-        Policy policy = policyRepository.findById(policyId)
-                .orElseThrow(() -> new RuntimeException("Policy not found"));
+    @Transactional(readOnly = true)
+    public PolicyWithClientResponse getPolicyWithClientById(Long policyId, String username) {
+        Policy policy = getOwnedPolicy(policyId, username);
         return mapToResponse(policy, policy.getClient());
     }
 
     /**
-     * Update policy status.
+     * Attach a PDF to a policy: upload to S3 (under the agent's prefix) and
+     * store the S3 key on the policy. Only the owning agent may do this.
+     */
+    @Transactional
+    @CacheEvict(value = { "policiesList" }, allEntries = true)
+    public PolicyWithClientResponse attachPdf(Long policyId, MultipartFile file, String username) {
+        Policy policy = getOwnedPolicy(policyId, username);
+        Long agentId = policy.getClient().getAgent().getId();
+        try {
+            // Replace any previously stored file for this policy.
+            if (policy.getPdfFilePath() != null && !policy.getPdfFilePath().isBlank()) {
+                cloudStorageService.deleteFile(policy.getPdfFilePath());
+            }
+            String key = cloudStorageService.uploadPolicyPdf(file, agentId, policy.getPolicyNumber());
+            policy.setPdfFilePath(key);
+            policy = policyRepository.save(policy);
+            logger.info("Attached PDF to policy {} (key: {})", policy.getPolicyNumber(), key);
+            return mapToResponse(policy, policy.getClient());
+        } catch (IllegalStateException e) {
+            throw e; // storage not configured -> surfaced as-is
+        } catch (Exception e) {
+            logger.error("Failed to attach PDF to policy {}: {}", policyId, e.getMessage(), e);
+            throw new RuntimeException("Failed to store PDF: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Fetch the stored PDF bytes for a policy — only if it belongs to the agent.
+     */
+    @Transactional(readOnly = true)
+    public CloudStorageService.StoredFile getPolicyPdf(Long policyId, String username) {
+        Policy policy = getOwnedPolicy(policyId, username);
+        if (policy.getPdfFilePath() == null || policy.getPdfFilePath().isBlank()) {
+            throw new ResourceNotFoundException("No PDF stored for this policy");
+        }
+        return cloudStorageService.downloadPolicyPdf(policy.getPdfFilePath());
+    }
+
+    /**
+     * Update policy status — scoped to the requesting agent.
      */
     @Transactional
     @CacheEvict(value = { "dashboardSummary", "renewalTrends", "revenueTrends", "policyDistribution", "aiInsights",
             "conversionFunnel", "policiesList" }, allEntries = true)
-    public PolicyWithClientResponse updatePolicyStatus(Long policyId, String status) {
-        Policy policy = policyRepository.findById(policyId)
-                .orElseThrow(() -> new RuntimeException("Policy not found"));
+    public PolicyWithClientResponse updatePolicyStatus(Long policyId, String status, String username) {
+        Policy policy = getOwnedPolicy(policyId, username);
         policy.setStatus(status);
         policy = policyRepository.save(policy);
         return mapToResponse(policy, policy.getClient());
@@ -169,10 +221,9 @@ public class PolicyService {
     @Transactional
     @CacheEvict(value = { "dashboardSummary", "renewalTrends", "revenueTrends", "policyDistribution", "aiInsights",
             "conversionFunnel", "policiesList" }, allEntries = true)
-    public PolicyWithClientResponse confirmAndRenew(Long oldPolicyId, ConfirmRenewalRequest request) {
-        // 1. Get the old policy
-        Policy oldPolicy = policyRepository.findById(oldPolicyId)
-                .orElseThrow(() -> new RuntimeException("Policy not found"));
+    public PolicyWithClientResponse confirmAndRenew(Long oldPolicyId, ConfirmRenewalRequest request, String username) {
+        // 1. Get the old policy (scoped to the requesting agent)
+        Policy oldPolicy = getOwnedPolicy(oldPolicyId, username);
 
         Client client = oldPolicy.getClient();
         logger.info("Confirming renewal for policy: {} | Client: {}",
@@ -199,6 +250,8 @@ public class PolicyService {
         newPolicy.setStatus("ACTIVE");
         newPolicy.setRenewalStatus("RENEWED");
         newPolicy.setManualRenewalNotes(request.getNotes());
+        // Carry the stored document forward so the agent keeps access to it.
+        newPolicy.setPdfFilePath(oldPolicy.getPdfFilePath());
         newPolicy.setClient(client);
 
         newPolicy = policyRepository.save(newPolicy);
@@ -252,11 +305,10 @@ public class PolicyService {
     @Transactional
     @CacheEvict(value = { "dashboardSummary", "renewalTrends", "revenueTrends", "policyDistribution", "aiInsights",
             "conversionFunnel", "policiesList" }, allEntries = true)
-    public PolicyWithClientResponse markAsManuallyRenewed(Long policyId, String notes, boolean renewed) {
+    public PolicyWithClientResponse markAsManuallyRenewed(Long policyId, String notes, boolean renewed, String username) {
         logger.info("Marking policy {} as manually handled. Renewed: {}", policyId, renewed);
 
-        Policy policy = policyRepository.findById(policyId)
-                .orElseThrow(() -> new RuntimeException("Policy not found with id: " + policyId));
+        Policy policy = getOwnedPolicy(policyId, username);
 
         if (renewed) {
             policy.setRenewalStatus("MANUAL_RENEWED");
@@ -275,10 +327,9 @@ public class PolicyService {
                     policy.getPolicyNumber());
 
             // Delete directly instead of calling internal @Transactional method
-            // PDF storage disabled — S3 deletion commented out
-            // if (policy.getPdfFilePath() != null && !policy.getPdfFilePath().isBlank()) {
-            // cloudStorageService.deleteFile(policy.getPdfFilePath());
-            // }
+            if (policy.getPdfFilePath() != null && !policy.getPdfFilePath().isBlank()) {
+                cloudStorageService.deleteFile(policy.getPdfFilePath());
+            }
 
             policyRepository.delete(policy);
 
@@ -291,20 +342,18 @@ public class PolicyService {
     }
 
     /**
-     * Delete a policy by ID.
+     * Delete a policy by ID (scoped to the requesting agent).
      * Also deletes the associated PDF from S3 if one exists.
      */
     @Transactional
     @CacheEvict(value = { "dashboardSummary", "renewalTrends", "revenueTrends", "policyDistribution", "aiInsights",
             "conversionFunnel", "policiesList" }, allEntries = true)
-    public void deletePolicy(Long policyId) {
-        Policy policy = policyRepository.findById(policyId)
-                .orElseThrow(() -> new RuntimeException("Policy not found"));
+    public void deletePolicy(Long policyId, String username) {
+        Policy policy = getOwnedPolicy(policyId, username);
 
-        // PDF storage disabled — S3 deletion commented out
-        // if (policy.getPdfFilePath() != null && !policy.getPdfFilePath().isBlank()) {
-        // cloudStorageService.deleteFile(policy.getPdfFilePath());
-        // }
+        if (policy.getPdfFilePath() != null && !policy.getPdfFilePath().isBlank()) {
+            cloudStorageService.deleteFile(policy.getPdfFilePath());
+        }
 
         policyRepository.delete(policy);
     }
@@ -336,8 +385,7 @@ public class PolicyService {
         response.setManualRenewalNotes(policy.getManualRenewalNotes());
         response.setCreatedAt(policy.getCreatedAt());
         response.setUpdatedAt(policy.getUpdatedAt());
-        // response.setHasPdf(policy.getPdfFilePath() != null &&
-        // !policy.getPdfFilePath().isBlank()); // PDF storage disabled
+        response.setHasPdf(policy.getPdfFilePath() != null && !policy.getPdfFilePath().isBlank());
         response.setClientId(client.getId());
         response.setClientFullName(client.getFullName());
         response.setClientEmail(client.getEmail());

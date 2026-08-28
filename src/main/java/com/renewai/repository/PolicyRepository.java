@@ -72,6 +72,13 @@ public interface PolicyRepository extends JpaRepository<Policy, Long> {
     @Query("SELECT p FROM Policy p JOIN FETCH p.client c WHERE c.agent.id = :agentId")
     List<Policy> findByAgentIdWithClient(@Param("agentId") Long agentId);
 
+    /**
+     * Fetch a single policy only if it belongs to the given agent.
+     * Used to enforce that an agent can only see/modify their own clients' policies.
+     */
+    @Query("SELECT p FROM Policy p JOIN FETCH p.client c WHERE p.id = :id AND c.agent.id = :agentId")
+    Optional<Policy> findByIdAndAgentId(@Param("id") Long id, @Param("agentId") Long agentId);
+
     @Query("SELECT p FROM Policy p WHERE p.client.agent.id = :agentId")
     List<Policy> findByAgentId(@Param("agentId") Long agentId);
 

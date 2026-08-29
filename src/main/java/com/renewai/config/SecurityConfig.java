@@ -50,10 +50,11 @@ public class SecurityConfig {
             // Authorization rules
             .authorizeHttpRequests(auth -> auth
                 // Public endpoints
+                .requestMatchers("/health").permitAll()
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
                 .requestMatchers("/error").permitAll()
-                 
+                  
                 // All other endpoints require authentication (removed role check)
                 .requestMatchers("/api/**").authenticated()
                  

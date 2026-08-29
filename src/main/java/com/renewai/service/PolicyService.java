@@ -57,6 +57,9 @@ public class PolicyService {
     @Autowired
     private CloudStorageService cloudStorageService;
 
+    @Autowired
+    private S3Service s3Service;
+
     /**
      * Load a policy by id, but only if it belongs to the given agent.
      * Throws 404 otherwise so agents cannot probe other agents' policy ids.
@@ -164,19 +167,16 @@ public class PolicyService {
     @CacheEvict(value = { "policiesList" }, allEntries = true)
     public PolicyWithClientResponse attachPdf(Long policyId, MultipartFile file, String username) {
         Policy policy = getOwnedPolicy(policyId, username);
-        Long agentId = policy.getClient().getAgent().getId();
         try {
-            // Replace any previously stored file for this policy.
-            if (policy.getPdfFilePath() != null && !policy.getPdfFilePath().isBlank()) {
-                cloudStorageService.deleteFile(policy.getPdfFilePath());
-            }
-            String key = cloudStorageService.uploadPolicyPdf(file, agentId, policy.getPolicyNumber());
+            String filename = file.getOriginalFilename() != null && !file.getOriginalFilename().isBlank()
+                    ? file.getOriginalFilename()
+                    : "contract.pdf";
+            String key = "policies/" + policyId + "/" + filename;
+            s3Service.upload(file, key);
             policy.setPdfFilePath(key);
             policy = policyRepository.save(policy);
             logger.info("Attached PDF to policy {} (key: {})", policy.getPolicyNumber(), key);
             return mapToResponse(policy, policy.getClient());
-        } catch (IllegalStateException e) {
-            throw e; // storage not configured -> surfaced as-is
         } catch (Exception e) {
             logger.error("Failed to attach PDF to policy {}: {}", policyId, e.getMessage(), e);
             throw new RuntimeException("Failed to store PDF: " + e.getMessage());

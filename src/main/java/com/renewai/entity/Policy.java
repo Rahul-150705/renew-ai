@@ -69,9 +69,16 @@ public class Policy {
     @Column(length = 1000)
     private String manualRenewalNotes;
 
-    // Path to the stored PDF file (nullable - not all policies have a PDF)
+    // Path / S3 object key to the stored PDF file (nullable - not all policies have a PDF)
     @Column(length = 500)
     private String pdfFilePath;
+
+    @Transient
+    private Boolean hasPdf;
+
+    public Boolean getHasPdf() {
+        return pdfFilePath != null && !pdfFilePath.isBlank();
+    }
 
     @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)

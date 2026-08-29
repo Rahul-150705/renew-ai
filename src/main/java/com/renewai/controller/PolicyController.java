@@ -117,17 +117,4 @@ public class PolicyController {
         }
         return ResponseEntity.ok(policyService.attachPdf(id, file, authentication.getName()));
     }
-
-    /**
-     * Stream the stored PDF for a policy back to the browser.
-     * Returns 404 unless the policy belongs to the authenticated agent and has a document.
-     */
-    @GetMapping("/{id}/pdf")
-    public ResponseEntity<byte[]> viewPolicyPdf(@PathVariable Long id, Authentication authentication) {
-        CloudStorageService.StoredFile stored = policyService.getPolicyPdf(id, authentication.getName());
-        return ResponseEntity.ok()
-                .contentType(MediaType.APPLICATION_PDF)
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"policy-" + id + ".pdf\"")
-                .body(stored.bytes());
-    }
 }

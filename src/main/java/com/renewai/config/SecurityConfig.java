@@ -26,6 +26,9 @@ public class SecurityConfig {
     @Autowired
     private JwtAuthenticationFilter jwtAuthenticationFilter;
 
+    @Autowired
+    private GoogleOAuthSuccessHandler googleOAuthSuccessHandler;
+
     /**
      * Configure security filter chain
      * - Public endpoints: /api/auth/** (login, register)
@@ -48,23 +51,27 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 // Public endpoints
                 .requestMatchers("/api/auth/**").permitAll()
+                .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
                 .requestMatchers("/error").permitAll()
-                
+                 
                 // All other endpoints require authentication (removed role check)
                 .requestMatchers("/api/**").authenticated()
-                
+                 
                 // Allow preflight OPTIONS requests for all endpoints
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                
+                 
                 // All other requests require authentication
                 .anyRequest().authenticated()
             )
-            
+            .oauth2Login(oauth -> oauth
+                .successHandler(googleOAuthSuccessHandler)
+            )
+             
             // Stateless session management
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
             )
-            
+             
             // Add JWT filter before UsernamePasswordAuthenticationFilter
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 

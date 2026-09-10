@@ -103,7 +103,7 @@ public class PolicyService {
                         return clientRepository.save(newClient);
                     });
 
-            if (policyRepository.existsByPolicyNumber(request.getPolicyNumber())) {
+            if (policyRepository.existsByPolicyNumberAndAgentId(request.getPolicyNumber(), agent.getId())) {
                 logger.warn("Policy number {} already exists", request.getPolicyNumber());
                 throw new RuntimeException("Policy number already exists");
             }
@@ -418,7 +418,8 @@ public class PolicyService {
         Client client = clientRepository.findById(policyRequest.getClientId())
                 .orElseThrow(() -> new RuntimeException("Client not found"));
 
-        if (policyRepository.existsByPolicyNumber(policyRequest.getPolicyNumber())) {
+        if (policyRepository.existsByPolicyNumberAndAgentId(
+                policyRequest.getPolicyNumber(), client.getAgent().getId())) {
             throw new RuntimeException("Policy number already exists");
         }
         if (policyRequest.getExpiryDate().isBefore(policyRequest.getStartDate())) {

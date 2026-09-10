@@ -56,11 +56,13 @@ public interface PolicyRepository extends JpaRepository<Policy, Long> {
     );
     
     /**
-     * Check if policy number already exists
-     * @param policyNumber the policy number to check
-     * @return true if policy number exists
+     * Check whether an agent already owns a policy with this number.
      */
-    boolean existsByPolicyNumber(String policyNumber);
+    @Query("SELECT COUNT(p) > 0 FROM Policy p WHERE p.policyNumber = :policyNumber AND p.client.agent.id = :agentId")
+    boolean existsByPolicyNumberAndAgentId(
+        @Param("policyNumber") String policyNumber,
+        @Param("agentId") Long agentId
+    );
 
     /**
      * Find all active policies expiring before a date

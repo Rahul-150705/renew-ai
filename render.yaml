@@ -24,13 +24,5 @@ services:
         value: 6379
       - key: REDIS_PASSWORD
         sync: false
-      - key: AWS_S3_BUCKET
-        sync: false
-      - key: AWS_S3_REGION
-        sync: false
-      - key: AWS_ACCESS_KEY_ID
-        sync: false
-      - key: AWS_SECRET_ACCESS_KEY
-        sync: false
       - key: TWILIO_ENABLED
         value: "false"

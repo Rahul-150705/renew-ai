@@ -23,11 +23,9 @@ public interface ClientRepository extends JpaRepository<Client, Long> {
     List<Client> findByAgent(Agent agent);
     
     /**
-     * Find client by email
-     * @param email the client's email
-     * @return Optional containing client if found
+     * Find a client by email within one agent's client portfolio.
      */
-    Optional<Client> findByEmail(String email);
+    Optional<Client> findByEmailAndAgent(String email, Agent agent);
     
     /**
      * Find client by phone number

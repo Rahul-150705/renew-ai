@@ -90,7 +90,7 @@ public class PolicyService {
                     .orElseThrow(() -> new RuntimeException("Agent not found: " + username));
 
             // Find existing client by email or create a new one
-            Client client = clientRepository.findByEmail(request.getClientEmail())
+            Client client = clientRepository.findByEmailAndAgent(request.getClientEmail(), agent)
                     .orElseGet(() -> {
                         logger.info("Creating new client for email: {}", request.getClientEmail());
                         Client newClient = new Client();

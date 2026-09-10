@@ -29,13 +29,18 @@ public class DatabaseSchemaMigration {
     }
 
     @EventListener(ApplicationReadyEvent.class)
-    public void removeGlobalPolicyNumberConstraint() throws SQLException {
+    public void removeGlobalAgentScopedConstraints() throws SQLException {
         try (var connection = dataSource.getConnection()) {
             if (!"PostgreSQL".equalsIgnoreCase(connection.getMetaData().getDatabaseProductName())) {
                 return;
             }
         }
 
+        dropSingleColumnUniqueConstraints("policies", "policy_number");
+        dropSingleColumnUniqueConstraints("clients", "email");
+    }
+
+    private void dropSingleColumnUniqueConstraints(String tableName, String columnName) {
         List<String> constraintNames = jdbcTemplate.queryForList("""
                 SELECT tc.constraint_name
                 FROM information_schema.table_constraints tc
@@ -44,17 +49,18 @@ public class DatabaseSchemaMigration {
                  AND tc.table_schema = kcu.table_schema
                  AND tc.table_name = kcu.table_name
                 WHERE tc.table_schema = current_schema()
-                  AND tc.table_name = 'policies'
+                  AND tc.table_name = ?
                   AND tc.constraint_type = 'UNIQUE'
                 GROUP BY tc.constraint_name
                 HAVING COUNT(*) = 1
-                   AND MAX(kcu.column_name) = 'policy_number'
-                """, String.class);
+                   AND MAX(kcu.column_name) = ?
+                """, String.class, tableName, columnName);
 
         for (String constraintName : constraintNames) {
             String quotedConstraintName = "\"" + constraintName.replace("\"", "\"\"") + "\"";
-            jdbcTemplate.execute("ALTER TABLE policies DROP CONSTRAINT " + quotedConstraintName);
-            logger.info("Removed obsolete global policy-number constraint: {}", constraintName);
+            String quotedTableName = "\"" + tableName + "\"";
+            jdbcTemplate.execute("ALTER TABLE " + quotedTableName + " DROP CONSTRAINT " + quotedConstraintName);
+            logger.info("Removed obsolete global {}.{} constraint: {}", tableName, columnName, constraintName);
         }
     }
 }

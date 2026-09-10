@@ -29,7 +29,7 @@ public class Client {
     @Column(nullable = false, length = 100)
     private String fullName;
     
-    @Column(nullable = false, unique = true, length = 100)
+    @Column(nullable = false, length = 100)
     private String email;
     
     // Phone number for SMS notifications (must include country code)

@@ -168,10 +168,10 @@ public class PolicyService {
     public PolicyWithClientResponse attachPdf(Long policyId, MultipartFile file, String username) {
         Policy policy = getOwnedPolicy(policyId, username);
         try {
-            String filename = file.getOriginalFilename() != null && !file.getOriginalFilename().isBlank()
-                    ? file.getOriginalFilename()
-                    : "contract.pdf";
-            String key = "policies/" + policyId + "/" + filename;
+            Long agentId = policy.getClient().getAgent().getId();
+            String safePolicyNumber = policy.getPolicyNumber().trim()
+                    .replaceAll("[^a-zA-Z0-9._-]", "_");
+            String key = "policies/agent-" + agentId + "/" + safePolicyNumber + ".pdf";
             s3Service.upload(file, key);
             policy.setPdfFilePath(key);
             policy = policyRepository.save(policy);

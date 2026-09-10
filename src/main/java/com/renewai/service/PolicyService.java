@@ -196,6 +196,20 @@ public class PolicyService {
     }
 
     /**
+     * Create a short-lived S3 URL for viewing a policy PDF.
+     * The ownership check prevents agents from requesting documents belonging
+     * to another agent.
+     */
+    @Transactional(readOnly = true)
+    public String getPolicyPdfUrl(Long policyId, String username) {
+        Policy policy = getOwnedPolicy(policyId, username);
+        if (policy.getPdfFilePath() == null || policy.getPdfFilePath().isBlank()) {
+            throw new ResourceNotFoundException("No PDF stored for this policy");
+        }
+        return s3Service.presignedGetUrl(policy.getPdfFilePath());
+    }
+
+    /**
      * Update policy status — scoped to the requesting agent.
      */
     @Transactional

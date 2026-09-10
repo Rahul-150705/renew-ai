@@ -244,7 +244,8 @@ public class PolicyService {
                 oldPolicy.getPolicyNumber(), client.getFullName());
 
         // 2. Generate new policy number
-        String newPolicyNumber = generateRenewedPolicyNumber(oldPolicy.getPolicyNumber());
+        String newPolicyNumber = generateRenewedPolicyNumber(
+                oldPolicy.getPolicyNumber(), client.getAgent().getId());
 
         // 3. Create new policy copying old details
         Policy newPolicy = new Policy();
@@ -282,7 +283,7 @@ public class PolicyService {
         return mapToResponse(newPolicy, client);
     }
 
-    private String generateRenewedPolicyNumber(String oldPolicyNumber) {
+    private String generateRenewedPolicyNumber(String oldPolicyNumber, Long agentId) {
         if (oldPolicyNumber.contains("-R")) {
             try {
                 int lastDash = oldPolicyNumber.lastIndexOf("-R");
@@ -290,7 +291,7 @@ public class PolicyService {
                 int renewalNum = Integer.parseInt(oldPolicyNumber.substring(lastDash + 2));
                 String newNumber = base + "-R" + (renewalNum + 1);
 
-                if (!policyRepository.existsByPolicyNumber(newNumber)) {
+                if (!policyRepository.existsByPolicyNumberAndAgentId(newNumber, agentId)) {
                     return newNumber;
                 }
             } catch (Exception e) {
@@ -299,7 +300,7 @@ public class PolicyService {
         }
 
         String newNumber = oldPolicyNumber + "-R1";
-        if (!policyRepository.existsByPolicyNumber(newNumber)) {
+        if (!policyRepository.existsByPolicyNumberAndAgentId(newNumber, agentId)) {
             return newNumber;
         }
 

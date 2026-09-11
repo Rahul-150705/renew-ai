@@ -341,9 +341,8 @@ public class PolicyService {
             logger.info("Policy {} marked as NOT renewed. Deleting policy as client is lost.",
                     policy.getPolicyNumber());
 
-            // Delete directly instead of calling internal @Transactional method
             if (policy.getPdfFilePath() != null && !policy.getPdfFilePath().isBlank()) {
-                cloudStorageService.deleteFile(policy.getPdfFilePath());
+                s3Service.delete(policy.getPdfFilePath());
             }
 
             policyRepository.delete(policy);
@@ -367,7 +366,7 @@ public class PolicyService {
         Policy policy = getOwnedPolicy(policyId, username);
 
         if (policy.getPdfFilePath() != null && !policy.getPdfFilePath().isBlank()) {
-            cloudStorageService.deleteFile(policy.getPdfFilePath());
+            s3Service.delete(policy.getPdfFilePath());
         }
 
         policyRepository.delete(policy);
